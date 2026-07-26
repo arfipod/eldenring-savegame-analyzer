@@ -1,14 +1,15 @@
-const integerFormatter = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 0 });
-const decimalFormatter = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 });
+import type { AppLanguage } from './i18n';
+import { DEFAULT_LANGUAGE, localeFor } from './i18n';
 
-export function formatNumber(value: number): string {
-  return Number.isFinite(value) ? integerFormatter.format(value) : '—';
+export function formatNumber(value: number, language: AppLanguage = DEFAULT_LANGUAGE): string {
+  return Number.isFinite(value)
+    ? new Intl.NumberFormat(localeFor(language), { maximumFractionDigits: 0 }).format(value)
+    : '—';
 }
 
-export function formatDecimal(value: number, digits = 2): string {
+export function formatDecimal(value: number, digits = 2, language: AppLanguage = DEFAULT_LANGUAGE): string {
   if (!Number.isFinite(value)) return '—';
-  if (digits === 2) return decimalFormatter.format(value);
-  return new Intl.NumberFormat('es-ES', { maximumFractionDigits: digits }).format(value);
+  return new Intl.NumberFormat(localeFor(language), { maximumFractionDigits: digits }).format(value);
 }
 
 export function formatDuration(seconds: number): string {
@@ -35,7 +36,7 @@ export function formatClock(seconds: number): string {
   return [hours, minutes, secs].map((part) => String(part).padStart(2, '0')).join(':');
 }
 
-export function formatBytes(bytes: number): string {
+export function formatBytes(bytes: number, language: AppLanguage = DEFAULT_LANGUAGE): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '—';
   if (bytes < 1024) return `${bytes} B`;
   const units = ['KiB', 'MiB', 'GiB'];
@@ -45,16 +46,16 @@ export function formatBytes(bytes: number): string {
     value /= 1024;
     index += 1;
   }
-  return `${formatDecimal(value, value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[index]}`;
+  return `${formatDecimal(value, value >= 100 ? 0 : value >= 10 ? 1 : 2, language)} ${units[index]}`;
 }
 
 export function formatOffset(offset: number): string {
   return `0x${Math.max(0, offset).toString(16).toUpperCase().padStart(8, '0')}`;
 }
 
-export function formatRate(numerator: number, seconds: number): string {
+export function formatRate(numerator: number, seconds: number, language: AppLanguage = DEFAULT_LANGUAGE): string {
   if (!Number.isFinite(numerator) || !Number.isFinite(seconds) || seconds <= 0) return '—';
-  return `${formatDecimal((numerator / seconds) * 3_600, 2)}/h`;
+  return `${formatDecimal((numerator / seconds) * 3_600, 2, language)}/h`;
 }
 
 export function formatPercent(value: number): string {

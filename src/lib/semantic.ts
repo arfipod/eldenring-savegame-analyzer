@@ -13,6 +13,8 @@ import type {
   SemanticSlot,
 } from '../types';
 import { analyzeBuild, getStartingClassName } from './build-advisor';
+import type { AppLanguage } from './i18n';
+import { DEFAULT_LANGUAGE, localeFor, localize } from './i18n';
 
 const HANDLE_CLASS = {
   weapon: 0x80000000,
@@ -28,15 +30,6 @@ const GAME_ID_OFFSET = {
   good: 0x40000000,
   ashOfWar: 0x80000000,
 } as const;
-
-const EMPTY_ITEM: ResolvedEquipmentItem = {
-  handle: 0,
-  rawItemId: 0,
-  baseItemId: 0,
-  name: 'Vacío',
-  type: 'unknown',
-  upgradeLevel: 0,
-};
 
 export function toHexId(value: number): string {
   return (value >>> 0).toString(16).toUpperCase().padStart(8, '0');
@@ -100,20 +93,28 @@ function resolveAshOfWar(
   gemHandle: number,
   gaByHandle: Map<number, GaItem>,
   catalog: SemanticCatalog,
+  language: AppLanguage,
 ): { id: number; name: string } | undefined {
   if (!gemHandle) return undefined;
   const ga = gaByHandle.get(gemHandle);
-  if (!ga) return { id: 0, name: `ID de ceniza ${toHexId(gemHandle)}` };
+  if (!ga) return {
+    id: 0,
+    name: localize(language, `Ash ID ${toHexId(gemHandle)}`, `ID de ceniza ${toHexId(gemHandle)}`),
+  };
   const raw = ga.itemId >>> 0;
   const direct = (raw ^ GAME_ID_OFFSET.ashOfWar) >>> 0;
   const found = findCatalogItem(catalog, 'ashOfWar', [raw, (GAME_ID_OFFSET.ashOfWar | direct) >>> 0, direct]);
-  return { id: direct, name: found?.item.name ?? `Ceniza 0x${toHexId(raw)}` };
+  return {
+    id: direct,
+    name: found?.item.name ?? localize(language, `Ash 0x${toHexId(raw)}`, `Ceniza 0x${toHexId(raw)}`),
+  };
 }
 
 function resolveHandle(
   handle: number,
   gaByHandle: Map<number, GaItem>,
   catalog: SemanticCatalog,
+  language: AppLanguage,
 ): HandleResolution {
   const unsignedHandle = handle >>> 0;
   if (unsignedHandle === 0 || unsignedHandle === 0xffff_ffff) {
@@ -122,7 +123,7 @@ function resolveHandle(
       rawItemId: 0,
       baseItemId: 0,
       hexId: '00000000',
-      name: 'Vacío',
+      name: localize(language, 'Empty', 'Vacío'),
       type: 'unknown',
       category: 'unknown',
       upgradeLevel: 0,
@@ -147,7 +148,7 @@ function resolveHandle(
         rawItemId,
         baseItemId: rawItemId,
         hexId: toHexId(rawItemId),
-        name: 'Mano desnuda',
+        name: localize(language, 'Bare hands', 'Mano desnuda'),
         type,
         category: 'armament',
         upgradeLevel: 0,
@@ -202,7 +203,9 @@ function resolveHandle(
 
   const found = findCatalogItem(catalog, type, candidates);
   const labelId = candidates[0] ?? rawItemId;
-  const ashOfWar = type === 'weapon' && ga ? resolveAshOfWar(ga.gemGaitemHandle, gaByHandle, catalog) : undefined;
+  const ashOfWar = type === 'weapon' && ga
+    ? resolveAshOfWar(ga.gemGaitemHandle, gaByHandle, catalog, language)
+    : undefined;
   return {
     handle: unsignedHandle,
     rawItemId,
@@ -240,16 +243,23 @@ function toEquipmentItem(resolved: HandleResolution): ResolvedEquipmentItem {
   };
 }
 
-function resolveSpell(id: number, catalog: SemanticCatalog): { id: number; name: string; hexId: string } {
-  if (id === 0 || id === 0xffff_ffff) return { id, name: 'Vacío', hexId: toHexId(id) };
+function resolveSpell(id: number, catalog: SemanticCatalog, language: AppLanguage): { id: number; name: string; hexId: string } {
+  if (id === 0 || id === 0xffff_ffff) {
+    return { id, name: localize(language, 'Empty', 'Vacío'), hexId: toHexId(id) };
+  }
   const gameId = (GAME_ID_OFFSET.good | id) >>> 0;
   const found = findCatalogItem(catalog, 'good', [gameId, id]);
-  return { id, name: found?.item.name ?? `Hechizo 0x${toHexId(gameId)}`, hexId: toHexId(gameId) };
+  return {
+    id,
+    name: found?.item.name ?? localize(language, `Spell 0x${toHexId(gameId)}`, `Hechizo 0x${toHexId(gameId)}`),
+    hexId: toHexId(gameId),
+  };
 }
 
-function resolveEquipment(slot: ParsedSlot, catalog: SemanticCatalog): ResolvedEquipment {
+function resolveEquipment(slot: ParsedSlot, catalog: SemanticCatalog, language: AppLanguage): ResolvedEquipment {
   const gaByHandle = new Map(slot.gaItems.map((item) => [item.gaitemHandle >>> 0, item]));
-  const resolve = (handle: number): ResolvedEquipmentItem => toEquipmentItem(resolveHandle(handle, gaByHandle, catalog));
+  const resolve = (handle: number): ResolvedEquipmentItem =>
+    toEquipmentItem(resolveHandle(handle, gaByHandle, catalog, language));
   return {
     rightHand: slot.equipment.rightHandArmaments.map(resolve),
     leftHand: slot.equipment.leftHandArmaments.map(resolve),
@@ -263,13 +273,14 @@ function resolveEquipment(slot: ParsedSlot, catalog: SemanticCatalog): ResolvedE
     quickSlots: slot.quickAndPouch.quickSlots.map(resolve),
     pouch: slot.quickAndPouch.pouch.map(resolve),
     physickTears: slot.physickTearHandles.map(resolve),
-    spells: slot.equippedSpells.map((id) => resolveSpell(id, catalog)),
+    spells: slot.equippedSpells.map((id) => resolveSpell(id, catalog, language)),
   };
 }
 
 function resolveInventory(
   slot: ParsedSlot,
   catalog: SemanticCatalog,
+  language: AppLanguage,
 ): ResolvedInventoryItem[] {
   const gaByHandle = new Map(slot.gaItems.map((item) => [item.gaitemHandle >>> 0, item]));
   const equippedHandles = new Set<number>([
@@ -292,7 +303,7 @@ function resolveInventory(
   ];
 
   return sourceEntries.map((entry) => {
-    const resolved = resolveHandle(entry.gaItemHandle, gaByHandle, catalog);
+    const resolved = resolveHandle(entry.gaItemHandle, gaByHandle, catalog, language);
     return {
       ...resolved,
       quantity: entry.quantity,
@@ -304,7 +315,7 @@ function resolveInventory(
   }).sort((a, b) => {
     if (a.equipped !== b.equipped) return a.equipped ? -1 : 1;
     if (a.type !== b.type) return a.type.localeCompare(b.type);
-    return a.name.localeCompare(b.name, 'es', { numeric: true });
+    return a.name.localeCompare(b.name, localeFor(language), { numeric: true });
   });
 }
 
@@ -357,21 +368,30 @@ function resolveProgress(slot: ParsedSlot, catalog: SemanticCatalog): SemanticPr
   };
 }
 
-function mapLabel(slot: ParsedSlot, lastGrace: string): string {
-  if (!lastGrace.startsWith('Entidad de gracia')) {
+function mapLabel(slot: ParsedSlot, lastGrace: string, language: AppLanguage): string {
+  if (!lastGrace.startsWith('Entidad de gracia') && !lastGrace.startsWith('Site of Grace entity')) {
     const separator = lastGrace.includes(' — ') ? ' — ' : ' - ';
     return lastGrace.split(separator)[0] ?? lastGrace;
   }
   const [a, b, c, d] = slot.playerPosition.mapId;
-  return `Mapa m${String(d).padStart(2, '0')}_${String(c).padStart(2, '0')}_${String(b).padStart(2, '0')}_${String(a).padStart(2, '0')}`;
+  const id = `m${String(d).padStart(2, '0')}_${String(c).padStart(2, '0')}_${String(b).padStart(2, '0')}_${String(a).padStart(2, '0')}`;
+  return localize(language, `Map ${id}`, `Mapa ${id}`);
 }
 
-export function createSemanticSlot(slot: ParsedSlot, catalog: SemanticCatalog): SemanticSlot {
-  const equipment = resolveEquipment(slot, catalog);
-  const inventory = resolveInventory(slot, catalog);
+export function createSemanticSlot(
+  slot: ParsedSlot,
+  catalog: SemanticCatalog,
+  language: AppLanguage = DEFAULT_LANGUAGE,
+): SemanticSlot {
+  const equipment = resolveEquipment(slot, catalog, language);
+  const inventory = resolveInventory(slot, catalog, language);
   const progress = resolveProgress(slot, catalog);
   const lastRestedGrace = catalog.graceEntities[String(slot.lastRestedGraceEntityId)]
-    ?? `Entidad de gracia ${slot.lastRestedGraceEntityId}`;
+    ?? localize(
+      language,
+      `Site of Grace entity ${slot.lastRestedGraceEntityId}`,
+      `Entidad de gracia ${slot.lastRestedGraceEntityId}`,
+    );
   const totalTalismanSlots = Math.min(4, Math.max(1, 1 + slot.player.additionalTalismanSlotCount));
 
   return {
@@ -381,7 +401,7 @@ export function createSemanticSlot(slot: ParsedSlot, catalog: SemanticCatalog): 
       level: slot.player.level,
       playtimeSeconds: slot.secondsPlayed,
       classCode: slot.player.archetypeCode,
-      className: getStartingClassName(slot.player.archetypeCode),
+      className: getStartingClassName(slot.player.archetypeCode, language),
       genderCode: slot.player.genderCode,
     },
     overview: {
@@ -394,7 +414,7 @@ export function createSemanticSlot(slot: ParsedSlot, catalog: SemanticCatalog): 
       totalFlasks: slot.player.maxCrimsonFlaskCount + slot.player.maxCeruleanFlaskCount,
       talismanSlots: totalTalismanSlots,
       lastRestedGrace,
-      mapLabel: mapLabel(slot, lastRestedGrace),
+      mapLabel: mapLabel(slot, lastRestedGrace, language),
       worldTime: [slot.worldTime.hour, slot.worldTime.minute, slot.worldTime.second]
         .map((value) => String(value).padStart(2, '0'))
         .join(':'),
@@ -402,7 +422,7 @@ export function createSemanticSlot(slot: ParsedSlot, catalog: SemanticCatalog): 
     },
     attributes: slot.player.attributes,
     vitals: { hp: slot.player.hp, fp: slot.player.fp, stamina: slot.player.stamina },
-    build: analyzeBuild(slot, equipment),
+    build: analyzeBuild(slot, equipment, language),
     equipment,
     inventory,
     progress,
@@ -410,8 +430,12 @@ export function createSemanticSlot(slot: ParsedSlot, catalog: SemanticCatalog): 
   };
 }
 
-export function createSemanticSlots(slots: ParsedSlot[], catalog: SemanticCatalog): SemanticSlot[] {
-  return slots.map((slot) => createSemanticSlot(slot, catalog));
+export function createSemanticSlots(
+  slots: ParsedSlot[],
+  catalog: SemanticCatalog,
+  language: AppLanguage = DEFAULT_LANGUAGE,
+): SemanticSlot[] {
+  return slots.map((slot) => createSemanticSlot(slot, catalog, language));
 }
 
 export function missingProgressEntries(
@@ -429,6 +453,13 @@ export function missingProgressEntries(
   return result.sort((a, b) => a.name.localeCompare(b.name, 'es', { numeric: true }));
 }
 
-export function emptyEquipment(): ResolvedEquipmentItem {
-  return { ...EMPTY_ITEM };
+export function emptyEquipment(language: AppLanguage = DEFAULT_LANGUAGE): ResolvedEquipmentItem {
+  return {
+    handle: 0,
+    rawItemId: 0,
+    baseItemId: 0,
+    name: localize(language, 'Empty', 'Vacío'),
+    type: 'unknown',
+    upgradeLevel: 0,
+  };
 }

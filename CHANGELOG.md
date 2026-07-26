@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Added complete English and Spanish localization with a persistent language switch.
+- Fixed UTF-16LE decoding for the pinned boss and Site of Grace catalogs.
+
 ## 1.0.0 — 2026-07-26
 
 - Initial React/Vite application.

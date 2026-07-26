@@ -378,6 +378,7 @@ export interface SemanticSlot {
 
 export interface WorkerParseRequest {
   type: 'parse';
+  language: import('./lib/i18n').AppLanguage;
   fileName: string;
   fileSize: number;
   lastModified: number;

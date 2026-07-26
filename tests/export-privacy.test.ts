@@ -120,7 +120,7 @@ describe('semantic export privacy', () => {
       }],
     } as SemanticSlot;
     const privateContext = {
-      save, slot: unresolvedSlot, catalog, spoilerMode: 'safe',
+      save, slot: unresolvedSlot, catalog, spoilerMode: 'safe', language: 'es',
       privacy: { includeSteamIds: false, includeCoordinates: false, includeRawEventFlags: false, includeRawInternalIds: false },
     } as const;
     const privateJson = JSON.stringify(buildSemanticExport(privateContext));
@@ -143,7 +143,7 @@ describe('semantic export privacy', () => {
       eventFlagBst: { '1': 0 },
     };
     const base = {
-      save, slot, catalog: spoilerCatalog,
+      save, slot, catalog: spoilerCatalog, language: 'es',
       privacy: { includeSteamIds: false, includeCoordinates: false, includeRawEventFlags: false, includeRawInternalIds: false },
     } as const;
 
@@ -174,5 +174,21 @@ describe('semantic export privacy', () => {
     expect(text).toContain('12.5');
     expect(text).toContain('AQID');
     expect(text).toContain('0123456789abcdef0123456789abcdef');
+  });
+
+  it('localizes semantic and Markdown export prose', () => {
+    const privacy = {
+      includeSteamIds: false,
+      includeCoordinates: false,
+      includeRawEventFlags: false,
+      includeRawInternalIds: false,
+    };
+    const englishContext = { save, slot, catalog, spoilerMode: 'safe', language: 'en', privacy } as const;
+    const spanishContext = { ...englishContext, language: 'es' } as const;
+
+    expect(JSON.stringify(buildSemanticExport(englishContext))).toContain('Structured data for human review');
+    expect(buildMarkdownReport(englishContext)).toContain('# Elden Ring save report');
+    expect(JSON.stringify(buildSemanticExport(spanishContext))).toContain('Datos estructurados para revisión humana');
+    expect(buildMarkdownReport(spanishContext)).toContain('# Informe de partida de Elden Ring');
   });
 });

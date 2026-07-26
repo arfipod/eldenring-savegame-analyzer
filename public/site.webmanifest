@@ -1,7 +1,7 @@
 {
   "name": "Elden Ring Savegame Analyzer",
   "short_name": "ER Save Analyzer",
-  "description": "Analizador local y de solo lectura para partidas PC de Elden Ring.",
+  "description": "A local, read-only analyzer for Elden Ring PC save files.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0b0d0c",

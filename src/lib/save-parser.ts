@@ -14,6 +14,8 @@ import type {
   Vec4,
 } from '../types';
 import { BinaryReader, bytesToHex, SaveParseError } from './binary-reader';
+import type { AppLanguage } from './i18n';
+import { DEFAULT_LANGUAGE, localize } from './i18n';
 import { md5Hex } from './md5';
 
 export const PARSER_VERSION = '1.0.0';
@@ -98,9 +100,13 @@ interface UserData10Result {
   profiles: ProfileSummary[];
 }
 
-function guardCount(value: number, maximum: number, label: string, offset: number): number {
+function guardCount(value: number, maximum: number, label: string, offset: number, language: AppLanguage): number {
   if (!Number.isInteger(value) || value < 0 || value > maximum) {
-    throw new SaveParseError(`${label} fuera de rango: ${value}`, offset);
+    throw new SaveParseError(localize(
+      language,
+      `${label} is out of range: ${value}`,
+      `${label} fuera de rango: ${value}`,
+    ), offset);
   }
   return value;
 }
@@ -109,29 +115,40 @@ export function parseEldenRingSave(
   buffer: ArrayBuffer,
   metadata: ParseFileMetadata,
   onProgress: ParseProgress = () => undefined,
+  language: AppLanguage = DEFAULT_LANGUAGE,
 ): ParsedSave {
-  const reader = new BinaryReader(buffer);
+  const reader = new BinaryReader(buffer, language);
+  const l = (english: string, spanish: string) => localize(language, english, spanish);
   const warnings: string[] = [];
 
-  onProgress('Validando contenedor BND4', 0.03);
+  onProgress(l('Validating BND4 container', 'Validando contenedor BND4'), 0.03);
   if (reader.length < USER_DATA_10_START + 0x100) {
-    throw new SaveParseError('El archivo es demasiado pequeño para ser una partida PC de Elden Ring');
+    throw new SaveParseError(l(
+      'The file is too small to be an Elden Ring PC save file.',
+      'El archivo es demasiado pequeño para ser una partida PC de Elden Ring.',
+    ));
   }
 
   for (let index = 0; index < PC_MAGIC.length; index += 1) {
     if (reader.byteAt(index) !== PC_MAGIC[index]) {
       throw new SaveParseError(
-        'No se ha encontrado la firma BND4. Solo se admiten partidas PC .sl2/.co2 compatibles.',
+        l(
+          'The BND4 signature was not found. Only compatible PC .sl2/.co2 save files are supported.',
+          'No se ha encontrado la firma BND4. Solo se admiten partidas PC .sl2/.co2 compatibles.',
+        ),
         index,
       );
     }
   }
 
-  onProgress('Leyendo perfiles y ranuras activas', 0.08);
-  const userData10 = readUserData10(reader);
+  onProgress(l('Reading profiles and active slots', 'Leyendo perfiles y ranuras activas'), 0.08);
+  const userData10 = readUserData10(reader, language);
   const activeProfiles = userData10.profiles.filter((profile) => profile.active);
   if (activeProfiles.length === 0) {
-    warnings.push('La tabla global no marca ninguna ranura como activa.');
+    warnings.push(l(
+      'The global table does not mark any slot as active.',
+      'La tabla global no marca ninguna ranura como activa.',
+    ));
   }
 
   const slots: ParsedSlot[] = [];
@@ -139,16 +156,25 @@ export function parseEldenRingSave(
     const profile = activeProfiles[activeIndex];
     if (!profile) continue;
     const fractionBase = 0.1 + (activeIndex / Math.max(activeProfiles.length, 1)) * 0.85;
-    onProgress(`Analizando ranura ${profile.slotIndex + 1}: ${profile.name || 'sin nombre'}`, fractionBase);
-    slots.push(readSlot(reader, profile, onProgress, fractionBase, activeProfiles.length));
+    onProgress(l(
+      `Analyzing slot ${profile.slotIndex + 1}: ${profile.name || 'unnamed'}`,
+      `Analizando ranura ${profile.slotIndex + 1}: ${profile.name || 'sin nombre'}`,
+    ), fractionBase);
+    slots.push(readSlot(reader, profile, onProgress, fractionBase, activeProfiles.length, language));
   }
 
-  onProgress('Terminando informe', 0.98);
+  onProgress(l('Finishing report', 'Terminando informe'), 0.98);
   if (slots.some((slot) => !slot.integrity.valid)) {
-    warnings.push('Al menos una ranura activa no coincide con su checksum MD5 almacenado.');
+    warnings.push(l(
+      'At least one active slot does not match its stored MD5 checksum.',
+      'Al menos una ranura activa no coincide con su checksum MD5 almacenado.',
+    ));
   }
   if (slots.some((slot) => slot.version > 300)) {
-    warnings.push('La versión interna de la partida es más reciente que las versiones validadas por este parser.');
+    warnings.push(l(
+      'The save file version is newer than the versions validated by this parser.',
+      'La versión interna de la partida es más reciente que las versiones validadas por este parser.',
+    ));
   }
 
   return {
@@ -168,7 +194,7 @@ export function parseEldenRingSave(
   };
 }
 
-function readUserData10(reader: BinaryReader): UserData10Result {
+function readUserData10(reader: BinaryReader, language: AppLanguage): UserData10Result {
   reader.seek(USER_DATA_10_START + SLOT_CHECKSUM_SIZE);
   reader.skip(4); // version
   const globalSteamId = reader.u64String();
@@ -177,7 +203,13 @@ function readUserData10(reader: BinaryReader): UserData10Result {
   // MenuSystemSaveLoad: u16 + u16 + size u32 + data[size]
   reader.skip(4);
   const menuSizeOffset = reader.pos();
-  const menuSize = guardCount(reader.u32(), 0x100000, 'Tamaño de menú global', menuSizeOffset);
+  const menuSize = guardCount(
+    reader.u32(),
+    0x100000,
+    localize(language, 'Global menu size', 'Tamaño de menú global'),
+    menuSizeOffset,
+    language,
+  );
   reader.skip(menuSize);
 
   const active = Array.from({ length: SLOT_COUNT }, () => reader.u8() !== 0);
@@ -204,13 +236,18 @@ function readSlot(
   onProgress: ParseProgress,
   fractionBase: number,
   activeSlotCount: number,
+  language: AppLanguage,
 ): ParsedSlot {
+  const l = (english: string, spanish: string) => localize(language, english, spanish);
   const slotBlockStart = SLOTS_START + SLOT_SIZE * profile.slotIndex;
   const dataStart = slotBlockStart + SLOT_CHECKSUM_SIZE;
   const storedDigest = reader.subarrayAt(slotBlockStart, SLOT_CHECKSUM_SIZE);
   const slotData = reader.subarrayAt(dataStart, SLOT_DATA_SIZE);
 
-  onProgress(`Verificando integridad de ${profile.name || `ranura ${profile.slotIndex + 1}`}`, fractionBase + 0.01);
+  onProgress(l(
+    `Verifying integrity of ${profile.name || `slot ${profile.slotIndex + 1}`}`,
+    `Verificando integridad de ${profile.name || `ranura ${profile.slotIndex + 1}`}`,
+  ), fractionBase + 0.01);
   const storedMd5Hex = bytesToHex(storedDigest);
   const computedMd5Hex = md5Hex(slotData);
 
@@ -240,7 +277,7 @@ function readSlot(
     if (item) gaItems.push(item);
   }
 
-  onProgress('Leyendo nivel, atributos y recursos', fractionBase + 0.09 / Math.max(activeSlotCount, 1));
+  onProgress(l('Reading level, attributes, and resources', 'Leyendo nivel, atributos y recursos'), fractionBase + 0.09 / Math.max(activeSlotCount, 1));
   const pgdStart = reader.pos();
   const player = {
     characterName: reader.utf16LeAt(pgdStart + PGD.characterName, 32),
@@ -318,8 +355,8 @@ function readSlot(
   recordOpaque('equipment.item_id_mirror', EQUIP_SLOTS_LENGTH);
   const equipment = readChrAsm(reader);
 
-  onProgress('Leyendo inventario y equipo', fractionBase + 0.16 / Math.max(activeSlotCount, 1));
-  const heldInventory = readInventory(reader, 0xa80, 0x180, 'held');
+  onProgress(l('Reading inventory and equipment', 'Leyendo inventario y equipo'), fractionBase + 0.16 / Math.max(activeSlotCount, 1));
+  const heldInventory = readInventory(reader, 0xa80, 0x180, 'held', language);
 
   const equippedSpells: number[] = [];
   for (let index = 0; index < 14; index += 1) {
@@ -332,7 +369,7 @@ function readSlot(
   const equippedGestures = Array.from({ length: 6 }, () => reader.u32());
 
   const projectileCountOffset = reader.pos();
-  const projectileCount = guardCount(reader.u32(), 100_000, 'Cantidad de proyectiles', projectileCountOffset);
+  const projectileCount = guardCount(reader.u32(), 100_000, l('Projectile count', 'Cantidad de proyectiles'), projectileCountOffset, language);
   const acquiredProjectiles: number[] = [];
   for (let index = 0; index < projectileCount; index += 1) {
     acquiredProjectiles.push(reader.u32());
@@ -344,11 +381,11 @@ function readSlot(
   reader.skip(4);
   recordOpaque('character.face_data', FACE_DATA_LENGTH, true);
 
-  const chestInventory = readInventory(reader, 0x780, 0x80, 'chest');
+  const chestInventory = readInventory(reader, 0x780, 0x80, 'chest', language);
   const unlockedGestures = Array.from({ length: 64 }, () => reader.u32());
 
   const regionCountOffset = reader.pos();
-  const regionCount = guardCount(reader.u32(), 100_000, 'Cantidad de regiones', regionCountOffset);
+  const regionCount = guardCount(reader.u32(), 100_000, l('Region count', 'Cantidad de regiones'), regionCountOffset, language);
   const unlockedRegionIds = Array.from({ length: regionCount }, () => reader.u32());
 
   const horseCoords: Vec3 = [reader.f32(), reader.f32(), reader.f32()];
@@ -369,7 +406,7 @@ function readSlot(
   reader.skip(8);
   reader.skip(4);
   const menuProfileSizeOffset = reader.pos();
-  const menuProfileSize = guardCount(reader.u32(), 0x100000, 'Tamaño del menú de perfil', menuProfileSizeOffset);
+  const menuProfileSize = guardCount(reader.u32(), 0x100000, l('Profile menu size', 'Tamaño del menú de perfil'), menuProfileSizeOffset, language);
   recordOpaque('profile.menu_save_load', menuProfileSize, true);
 
   recordOpaque('trophy.equip_data', TROPHY_EQUIP_LENGTH);
@@ -377,10 +414,10 @@ function readSlot(
 
   reader.skip(4);
   const tutorialSizeOffset = reader.pos();
-  const tutorialSize = guardCount(reader.u32(), 0x100000, 'Tamaño de tutoriales', tutorialSizeOffset);
+  const tutorialSize = guardCount(reader.u32(), 0x100000, l('Tutorial data size', 'Tamaño de tutoriales'), tutorialSizeOffset, language);
   const tutorialCount = reader.u32();
   if (tutorialCount !== 0) {
-    if (tutorialSize < 4) throw new SaveParseError('Bloque de tutoriales inconsistente', tutorialSizeOffset);
+    if (tutorialSize < 4) throw new SaveParseError(l('Inconsistent tutorial block', 'Bloque de tutoriales inconsistente'), tutorialSizeOffset);
     recordOpaque('tutorial.data', tutorialSize - 4, true);
   }
 
@@ -394,7 +431,7 @@ function readSlot(
   reader.skip(4);
   reader.skip(4);
 
-  onProgress('Decodificando progreso y banderas de evento', fractionBase + 0.28 / Math.max(activeSlotCount, 1));
+  onProgress(l('Decoding progress and event flags', 'Decodificando progreso y banderas de evento'), fractionBase + 0.28 / Math.max(activeSlotCount, 1));
   const eventFlagsOffset = reader.pos();
   const eventFlags = reader.bytesCopy(EVENT_FLAGS_LENGTH);
   opaqueSections.push({ name: 'progress.event_flags', offset: eventFlagsOffset, length: EVENT_FLAGS_LENGTH });
@@ -403,7 +440,7 @@ function readSlot(
   const skipLengthPrefixed = (name: string): void => {
     const sizeOffset = reader.pos();
     const size = reader.i32();
-    guardCount(size, SLOT_DATA_SIZE, `Tamaño de ${name}`, sizeOffset);
+    guardCount(size, SLOT_DATA_SIZE, l(`Size of ${name}`, `Tamaño de ${name}`), sizeOffset, language);
     recordOpaque(name, size, true);
   };
   skipLengthPrefixed('world.field_area');
@@ -459,7 +496,10 @@ function readSlot(
 
   const parseEndOffset = reader.pos();
   if (parseEndOffset > dataStart + SLOT_DATA_SIZE) {
-    throw new SaveParseError('El parser ha sobrepasado el final de la ranura', parseEndOffset);
+    throw new SaveParseError(l(
+      'The parser has read past the end of the slot.',
+      'El parser ha sobrepasado el final de la ranura.',
+    ), parseEndOffset);
   }
 
   return {
@@ -528,18 +568,26 @@ function readInventory(
   commonCapacity: number,
   keyCapacity: number,
   storage: 'held' | 'chest',
+  language: AppLanguage,
 ): InventoryBlock {
   const commonCountOffset = reader.pos();
   const commonDistinctCount = guardCount(
     reader.u32(),
     commonCapacity,
-    'Elementos comunes del inventario',
+    localize(language, 'Common inventory item count', 'Elementos comunes del inventario'),
     commonCountOffset,
+    language,
   );
   const commonItems = readInventoryItems(reader, commonCapacity, commonDistinctCount, storage, false);
 
   const keyCountOffset = reader.pos();
-  const keyDistinctCount = guardCount(reader.u32(), keyCapacity, 'Objetos clave del inventario', keyCountOffset);
+  const keyDistinctCount = guardCount(
+    reader.u32(),
+    keyCapacity,
+    localize(language, 'Key inventory item count', 'Objetos clave del inventario'),
+    keyCountOffset,
+    language,
+  );
   const keyItems = readInventoryItems(reader, keyCapacity, keyDistinctCount, storage, true);
   reader.skip(8);
 

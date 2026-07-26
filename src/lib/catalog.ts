@@ -1,5 +1,7 @@
 import { fallbackCatalog } from '../data/fallback-catalog';
 import type { CatalogItem, CatalogItemMap, SemanticCatalog } from '../types';
+import type { AppLanguage } from './i18n';
+import { DEFAULT_LANGUAGE, localize } from './i18n';
 
 const CHECKLIST_COMMIT = 'be4060d21f4d88bb437bedf76c2a1b06a62590ac';
 const CHECKLIST_ROOT = `https://raw.githubusercontent.com/CyberGiant7/Elden-Ring-Automatic-Checklist/${CHECKLIST_COMMIT}/assets/json`;
@@ -8,6 +10,7 @@ const ERDB_COMMIT = '7b6f6e395a72708f96672e1448d0ef8a2ab2344f';
 const ERDB_ROOT = `https://raw.githubusercontent.com/Elden-Ring-LLM/Elden-Ring-LLM/${ERDB_COMMIT}/erdb/json`;
 const GRACE_ENTITIES_URL = `https://raw.githubusercontent.com/amacati/SoulsGym/${SOULSGYM_COMMIT}/soulsgym/core/data/eldenring/bonfires.yaml`;
 const CACHE_NAME = 'eldenring-semantic-catalog-v2';
+const MAX_CATALOG_BYTES = 16 * 1024 * 1024;
 
 interface RawInventoryCatalog {
   armament?: CatalogItemMap;
@@ -79,10 +82,57 @@ async function fetchText(url: string): Promise<string> {
   try {
     const response = await cachedFetchWithSignal(url, controller.signal);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return (await response.text()).replace(/^\uFEFF/, '');
+    return decodeCatalogText(await readResponseBytes(response));
   } finally {
     globalThis.clearTimeout(timeout);
   }
+}
+
+async function readResponseBytes(response: Response): Promise<Uint8Array> {
+  const declaredLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_CATALOG_BYTES) {
+    throw new Error(`Catalog exceeds the ${MAX_CATALOG_BYTES}-byte limit`);
+  }
+  if (!response.body) {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.length > MAX_CATALOG_BYTES) throw new Error(`Catalog exceeds the ${MAX_CATALOG_BYTES}-byte limit`);
+    return bytes;
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.length;
+    if (total > MAX_CATALOG_BYTES) {
+      await reader.cancel();
+      throw new Error(`Catalog exceeds the ${MAX_CATALOG_BYTES}-byte limit`);
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
+}
+
+export function decodeCatalogText(bytes: Uint8Array): string {
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+    if ((bytes.length - 2) % 2 !== 0) throw new Error('Invalid UTF-16LE catalog byte length');
+    return new TextDecoder('utf-16le', { fatal: true }).decode(bytes.subarray(2));
+  }
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    if ((bytes.length - 2) % 2 !== 0) throw new Error('Invalid UTF-16BE catalog byte length');
+    return new TextDecoder('utf-16be', { fatal: true }).decode(bytes.subarray(2));
+  }
+  const start = bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : 0;
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(start));
 }
 
 async function cachedFetchWithSignal(url: string, signal: AbortSignal): Promise<Response> {
@@ -138,13 +188,15 @@ function withFallback(remote: SemanticCatalog): SemanticCatalog {
 
 export async function loadSemanticCatalog(
   onStatus: (message: string) => void = () => undefined,
+  language: AppLanguage = DEFAULT_LANGUAGE,
 ): Promise<SemanticCatalog> {
+  const l = (english: string, spanish: string) => localize(language, english, spanish);
   const warnings: string[] = [];
   const loadedSources: string[] = [];
 
   const attempt = async <T>(label: string, url: string): Promise<T | null> => {
     try {
-      onStatus(`Cargando ${label}…`);
+      onStatus(l(`Loading ${label}…`, `Cargando ${label}…`));
       const value = await fetchJson<T>(url);
       loadedSources.push(label);
       return value;
@@ -169,37 +221,37 @@ export async function loadSemanticCatalog(
     erdbCrafting,
     erdbBolstering,
   ] = await Promise.all([
-    attempt<RawInventoryCatalog>('catálogo base MIT', `${CHECKLIST_ROOT}/all_items.json`),
-    attempt<RawInventoryCatalog & RawProgressCatalog>('catálogo DLC MIT', `${CHECKLIST_ROOT}/dlc_items.json`),
-    attempt<RawProgressCatalog>('jefes', `${CHECKLIST_ROOT}/bosses.json`),
-    attempt<RawProgressCatalog>('lugares de gracia', `${CHECKLIST_ROOT}/graces.json`),
-    attempt<RawProgressCatalog>('libros de recetas', `${CHECKLIST_ROOT}/cookbooks.json`),
-    attempt<RawProgressCatalog>('rodamientos de campana', `${CHECKLIST_ROOT}/bell_bearings.json`),
-    attempt<RawProgressCatalog>('hojas de afilar', `${CHECKLIST_ROOT}/whetblades.json`),
-    attempt<RawProgressCatalog>('herramientas', `${CHECKLIST_ROOT}/tools.json`),
-    attempt<RawProgressCatalog>('gestos', `${CHECKLIST_ROOT}/gestures.json`),
-    attempt<RawProgressCatalog>('lágrimas de cristal', `${CHECKLIST_ROOT}/crystal_tears.json`),
-    attempt<ErdbCatalog>('ERDB: herramientas y consumibles', `${ERDB_ROOT}/tools.json`),
-    attempt<ErdbCatalog>('ERDB: materiales de fabricación', `${ERDB_ROOT}/crafting-materials.json`),
-    attempt<ErdbCatalog>('ERDB: materiales de mejora', `${ERDB_ROOT}/bolstering-materials.json`),
+    attempt<RawInventoryCatalog>(l('MIT base catalog', 'catálogo base MIT'), `${CHECKLIST_ROOT}/all_items.json`),
+    attempt<RawInventoryCatalog & RawProgressCatalog>(l('MIT DLC catalog', 'catálogo DLC MIT'), `${CHECKLIST_ROOT}/dlc_items.json`),
+    attempt<RawProgressCatalog>(l('bosses', 'jefes'), `${CHECKLIST_ROOT}/bosses.json`),
+    attempt<RawProgressCatalog>(l('Sites of Grace', 'lugares de gracia'), `${CHECKLIST_ROOT}/graces.json`),
+    attempt<RawProgressCatalog>(l('cookbooks', 'libros de recetas'), `${CHECKLIST_ROOT}/cookbooks.json`),
+    attempt<RawProgressCatalog>(l('bell bearings', 'rodamientos de campana'), `${CHECKLIST_ROOT}/bell_bearings.json`),
+    attempt<RawProgressCatalog>(l('whetblades', 'hojas de afilar'), `${CHECKLIST_ROOT}/whetblades.json`),
+    attempt<RawProgressCatalog>(l('tools', 'herramientas'), `${CHECKLIST_ROOT}/tools.json`),
+    attempt<RawProgressCatalog>(l('gestures', 'gestos'), `${CHECKLIST_ROOT}/gestures.json`),
+    attempt<RawProgressCatalog>(l('crystal tears', 'lágrimas de cristal'), `${CHECKLIST_ROOT}/crystal_tears.json`),
+    attempt<ErdbCatalog>(l('ERDB: tools and consumables', 'ERDB: herramientas y consumibles'), `${ERDB_ROOT}/tools.json`),
+    attempt<ErdbCatalog>(l('ERDB: crafting materials', 'ERDB: materiales de fabricación'), `${ERDB_ROOT}/crafting-materials.json`),
+    attempt<ErdbCatalog>(l('ERDB: upgrade materials', 'ERDB: materiales de mejora'), `${ERDB_ROOT}/bolstering-materials.json`),
   ]);
 
   let eventFlagBst: Record<string, number> = {};
   try {
-    onStatus('Cargando índice de banderas de evento…');
+    onStatus(l('Loading event flag index…', 'Cargando índice de banderas de evento…'));
     eventFlagBst = await fetchJson<Record<string, number>>(`${CHECKLIST_ROOT}/eventflag_bst.json`);
-    loadedSources.push('índice de banderas de evento');
+    loadedSources.push(l('event flag index', 'índice de banderas de evento'));
   } catch (error) {
-    warnings.push(`Índice de banderas: ${error instanceof Error ? error.message : String(error)}`);
+    warnings.push(`${l('Event flag index', 'Índice de banderas')}: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   let graceEntities: Record<string, string> = {};
   try {
-    onStatus('Cargando nombres de puntos de gracia…');
+    onStatus(l('Loading Site of Grace names…', 'Cargando nombres de puntos de gracia…'));
     graceEntities = parseGraceEntities(await fetchText(GRACE_ENTITIES_URL));
-    loadedSources.push('entidades de gracia (SoulsGym, MIT)');
+    loadedSources.push(l('Site of Grace entities (SoulsGym, MIT)', 'entidades de gracia (SoulsGym, MIT)'));
   } catch (error) {
-    warnings.push(`Entidades de gracia: ${error instanceof Error ? error.message : String(error)}`);
+    warnings.push(`${l('Site of Grace entities', 'Entidades de gracia')}: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   const baseInventory = base ?? {};
@@ -242,13 +294,18 @@ export async function loadSemanticCatalog(
 
   const result = withFallback(remote);
   if (loadedSources.length === 0) {
-    result.warnings.push('No se pudo cargar el catálogo remoto; se usa el catálogo mínimo integrado.');
+    result.warnings.push(l(
+      'The remote catalog could not be loaded; the minimal built-in catalog is being used.',
+      'No se pudo cargar el catálogo remoto; se usa el catálogo mínimo integrado.',
+    ));
   }
   return result;
 }
 
-export function getFallbackCatalog(): SemanticCatalog {
-  return structuredClone(fallbackCatalog);
+export function getFallbackCatalog(language: AppLanguage = DEFAULT_LANGUAGE): SemanticCatalog {
+  const catalog = structuredClone(fallbackCatalog);
+  catalog.loadedSources = [localize(language, 'built-in fallback', 'fallback integrado')];
+  return catalog;
 }
 
 export async function clearCatalogCache(): Promise<void> {
@@ -258,4 +315,3 @@ export async function clearCatalogCache(): Promise<void> {
 export function catalogSourceInfo(): { checklistCommit: string; soulsGymCommit: string; erdbCommit: string } {
   return { checklistCommit: CHECKLIST_COMMIT, soulsGymCommit: SOULSGYM_COMMIT, erdbCommit: ERDB_COMMIT };
 }
-

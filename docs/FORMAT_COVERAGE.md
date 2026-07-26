@@ -1,49 +1,49 @@
-# Cobertura del formato de partida
+# Save format coverage
 
-## Contenedor global
+## Global container
 
-| Área | Estado | Observaciones |
+| Area | Status | Notes |
 |---|---|---|
-| Firma `BND4` | Verificado | Rechazo inmediato si no coincide. |
-| Cabecera y offsets de ranura | Verificado | 10 ranuras de tamaño fijo. |
-| `UserData10` | Verificado | Steam ID global, perfiles activos, nombre, nivel y tiempo. |
-| Checksum de ranura | Verificado | MD5 almacenado frente a los 0x280000 bytes de datos. |
+| `BND4` signature | Verified | Rejected immediately if it does not match. |
+| Header and slot offsets | Verified | 10 fixed-size slots. |
+| `UserData10` | Verified | Global Steam ID, active profiles, name, level, and play time. |
+| Slot checksum | Verified | Stored MD5 compared with the 0x280000 data bytes. |
 
-## Ranura de personaje
+## Character slot
 
-| Grupo | Estado | Datos principales |
+| Group | Status | Main data |
 |---|---|---|
-| Versión y mapa | Verificado | Versión interna y cuatro bytes de mapa. |
-| `GaItem` | Verificado/variable | Handles, IDs, asociación con ceniza de guerra. |
-| `PlayerGameData` | Verificado | Atributos, recursos, nivel, runas, clase, nombre, frascos, online y DLC. |
-| Equipo | Verificado | Manos, armadura, talismanes, munición y ranuras activas. |
-| Inventario y baúl | Verificado | Objetos comunes y clave, cantidades e índices. |
-| Magia, bolsa y acceso rápido | Verificado | Hechizos y handles de objetos. |
-| Gestos y proyectiles | Verificado | Equipados, desbloqueados y adquiridos. |
-| Físico Maravilloso | Verificado | Dos handles de lágrimas. |
-| Regiones y gracia | Verificado | Regiones desbloqueadas y última gracia. |
-| Montura | Verificado parcialmente | Posición, estado y PV; varios bytes siguen opacos. |
-| Muertes y mancha de sangre | Verificado | Recuento, runas, mapa y posición. |
-| Posición del jugador | Verificado | Coordenadas, mapa y ángulo; privadas por defecto. |
-| Hora/clima | Verificado parcialmente | Hora y campos básicos de clima. |
-| Banderas de evento | Preservado y consultable | Bitfield completo; se resuelven solo IDs catalogados. |
-| Efectos especiales | Verificado estructuralmente | IDs y duración; nombres no siempre disponibles. |
-| Bloques online, tutoriales y sistema | Indexados/opacos | Longitud, offset y vista previa; sin semántica inventada. |
+| Version and map | Verified | Internal version and four map bytes. |
+| `GaItem` | Verified/variable | Handles, IDs, and Ash of War association. |
+| `PlayerGameData` | Verified | Attributes, resources, level, runes, class, name, flasks, online data, and DLC status. |
+| Equipment | Verified | Hands, armor, talismans, ammunition, and active slots. |
+| Inventory and chest | Verified | Common and key items, quantities, and indices. |
+| Magic, pouch, and quick slots | Verified | Spells and item handles. |
+| Gestures and projectiles | Verified | Equipped, unlocked, and acquired entries. |
+| Flask of Wondrous Physick | Verified | Two crystal tear handles. |
+| Regions and Sites of Grace | Verified | Unlocked regions and last Site of Grace. |
+| Mount | Partially verified | Position, state, and HP; several bytes remain opaque. |
+| Deaths and bloodstain | Verified | Count, runes, map, and position. |
+| Player position | Verified | Coordinates, map, and angle; private by default. |
+| Time/weather | Partially verified | Time and basic weather fields. |
+| Event flags | Preserved and queryable | Complete bitfield; only cataloged IDs are resolved. |
+| Special effects | Structurally verified | IDs and duration; names are not always available. |
+| Online, tutorial, and system blocks | Indexed/opaque | Length, offset, and preview, with no invented semantics. |
 
-## Semántica
+## Semantics
 
-La lectura binaria y la resolución de nombres son capas distintas:
+Binary reading and name resolution are separate layers:
 
-1. El parser obtiene el valor exacto y conserva el ID.
-2. La capa semántica busca el ID en un catálogo.
-3. Cuando existe una ficha enriquecida, añade resumen funcional, descripción, categoría, rareza y límites de almacenamiento.
-4. Si no existe, muestra `ID 0x…` con confianza `raw-id-only`.
-5. Una actualización del catálogo puede mejorar nombres sin cambiar el parser.
+1. The parser obtains the exact value and preserves the ID.
+2. The semantic layer looks up the ID in a catalog.
+3. When an enriched record exists, it adds a functional summary, description, category, rarity, and storage limits.
+4. Otherwise, it displays `ID 0x…` with `raw-id-only` confidence.
+5. A catalog update can improve names without changing the parser.
 
-## Banderas de evento
+## Event flags
 
-El índice usa bloques de 1.000 flags y un mapa BST comunitario. Dentro de cada bloque se aplican bytes de 125 posiciones y bits en orden MSB-first. Si el bloque no está catalogado o queda fuera del bitfield, el resultado es `null`, no `false`.
+The index uses blocks of 1,000 flags and a community BST mapping. Each block uses 125 bytes with bits in MSB-first order. If a block is not cataloged or lies outside the bitfield, the result is `null`, not `false`.
 
-## Versionado y compatibilidad futura
+## Versioning and future compatibility
 
-La versión del esquema exportado es independiente de la versión interna del save. Los cambios incompatibles deben incrementar el sufijo del esquema (`semantic.v2`, por ejemplo). Una versión de juego más reciente que el rango validado genera una advertencia; nunca activa escritura o reparación automática.
+The export schema version is independent of the save file's internal version. Incompatible changes must increment the schema suffix (`semantic.v2`, for example). A game version newer than the validated range produces a warning; it never enables automatic writing or repair.

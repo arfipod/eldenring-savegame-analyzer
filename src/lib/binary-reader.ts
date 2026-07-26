@@ -1,4 +1,6 @@
 import type { ByteTuple4 } from '../types';
+import type { AppLanguage } from './i18n';
+import { DEFAULT_LANGUAGE, localize } from './i18n';
 
 export class SaveParseError extends Error {
   readonly offset?: number;
@@ -13,11 +15,13 @@ export class SaveParseError extends Error {
 export class BinaryReader {
   readonly bytes: Uint8Array;
   readonly view: DataView;
+  readonly language: AppLanguage;
   private cursor = 0;
 
-  constructor(buffer: ArrayBuffer) {
+  constructor(buffer: ArrayBuffer, language: AppLanguage = DEFAULT_LANGUAGE) {
     this.bytes = new Uint8Array(buffer);
     this.view = new DataView(buffer);
+    this.language = language;
   }
 
   get length(): number {
@@ -34,11 +38,19 @@ export class BinaryReader {
 
   ensure(length: number, at = this.cursor): void {
     if (!Number.isSafeInteger(length) || length < 0) {
-      throw new SaveParseError(`Longitud binaria inválida: ${length}`, at);
+      throw new SaveParseError(localize(
+        this.language,
+        `Invalid binary length: ${length}`,
+        `Longitud binaria inválida: ${length}`,
+      ), at);
     }
     if (at < 0 || at + length > this.length) {
       throw new SaveParseError(
-        `Partida truncada: se necesitan ${length} bytes y quedan ${Math.max(0, this.length - at)}`,
+        localize(
+          this.language,
+          `Truncated save file: ${length} bytes are required and ${Math.max(0, this.length - at)} remain`,
+          `Partida truncada: se necesitan ${length} bytes y quedan ${Math.max(0, this.length - at)}`,
+        ),
         at,
       );
     }

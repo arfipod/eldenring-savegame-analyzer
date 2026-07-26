@@ -1,4 +1,6 @@
 import { STARTING_CLASSES } from '../data/fallback-catalog';
+import type { AppLanguage } from './i18n';
+import { DEFAULT_LANGUAGE, localeFor, localize } from './i18n';
 import type {
   AdviceItem,
   AttributeKey,
@@ -26,18 +28,30 @@ const STARTING_CLASS_DATA: Record<number, StartingClassData> = {
 };
 
 const DAMAGE_STATS: AttributeKey[] = ['strength', 'dexterity', 'intelligence', 'faith', 'arcane'];
-const LABELS: Record<AttributeKey, string> = {
-  vigor: 'Vigor',
-  mind: 'Mente',
-  endurance: 'Aguante',
-  strength: 'Fuerza',
-  dexterity: 'Destreza',
-  intelligence: 'Inteligencia',
-  faith: 'Fe',
-  arcane: 'Arcano',
+const LABELS: Record<AppLanguage, Record<AttributeKey, string>> = {
+  en: {
+    vigor: 'Vigor',
+    mind: 'Mind',
+    endurance: 'Endurance',
+    strength: 'Strength',
+    dexterity: 'Dexterity',
+    intelligence: 'Intelligence',
+    faith: 'Faith',
+    arcane: 'Arcane',
+  },
+  es: {
+    vigor: 'Vigor',
+    mind: 'Mente',
+    endurance: 'Aguante',
+    strength: 'Fuerza',
+    dexterity: 'Destreza',
+    intelligence: 'Inteligencia',
+    faith: 'Fe',
+    arcane: 'Arcano',
+  },
 };
 
-function inferArchetype(slot: ParsedSlot, equipment: ResolvedEquipment): {
+function inferArchetype(slot: ParsedSlot, equipment: ResolvedEquipment, language: AppLanguage): {
   label: string;
   primaryStats: AttributeKey[];
   summary: string;
@@ -50,27 +64,40 @@ function inferArchetype(slot: ParsedSlot, equipment: ResolvedEquipment): {
     .filter((item) => item.handle !== 0)
     .map((item) => item.name)
     .filter((name) => !name.startsWith('ID '));
-  const weaponText = mainWeaponNames.length > 0 ? ` con ${mainWeaponNames.slice(0, 2).join(' / ')}` : '';
+  const l = (english: string, spanish: string) => localize(language, english, spanish);
+  const labels = LABELS[language];
+  const weaponText = mainWeaponNames.length > 0
+    ? l(` with ${mainWeaponNames.slice(0, 2).join(' / ')}`, ` con ${mainWeaponNames.slice(0, 2).join(' / ')}`)
+    : '';
 
   let label: string;
   let primaryStats: AttributeKey[];
   if (first.value - second.value <= 10 && second.value >= 18) {
     primaryStats = [first.key, second.key];
-    label = `${LABELS[first.key]} / ${LABELS[second.key]}`;
+    label = `${labels[first.key]} / ${labels[second.key]}`;
   } else {
     primaryStats = [first.key];
-    label = LABELS[first.key];
+    label = labels[first.key];
   }
 
   const faithSupport = stats.faith >= 12 && !primaryStats.includes('faith');
   const intelligenceSupport = stats.intelligence >= 12 && !primaryStats.includes('intelligence');
   const arcaneSupport = stats.arcane >= 12 && !primaryStats.includes('arcane');
-  const support = faithSupport ? ' con Fe de apoyo' : intelligenceSupport ? ' con Inteligencia de apoyo' : arcaneSupport ? ' con Arcano de apoyo' : '';
+  const support = faithSupport
+    ? l(' with supporting Faith', ' con Fe de apoyo')
+    : intelligenceSupport
+      ? l(' with supporting Intelligence', ' con Inteligencia de apoyo')
+      : arcaneSupport
+        ? l(' with supporting Arcane', ' con Arcano de apoyo')
+        : '';
 
   return {
     label: `${label}${support}`,
     primaryStats,
-    summary: `Build centrada en ${label.toLowerCase()}${support}${weaponText}.`,
+    summary: l(
+      `Build focused on ${label.toLocaleLowerCase('en')}${support}${weaponText}.`,
+      `Build centrada en ${label.toLocaleLowerCase('es')}${support}${weaponText}.`,
+    ),
   };
 }
 
@@ -97,8 +124,13 @@ function pointAllocation(slot: ParsedSlot): {
   return { invested, expectedLevel, consistent: expectedLevel === slot.player.level };
 }
 
-export function analyzeBuild(slot: ParsedSlot, equipment: ResolvedEquipment): BuildAnalysis {
-  const inferred = inferArchetype(slot, equipment);
+export function analyzeBuild(
+  slot: ParsedSlot,
+  equipment: ResolvedEquipment,
+  language: AppLanguage = DEFAULT_LANGUAGE,
+): BuildAnalysis {
+  const l = (english: string, spanish: string) => localize(language, english, spanish);
+  const inferred = inferArchetype(slot, equipment, language);
   const allocation = pointAllocation(slot);
   const advice: AdviceItem[] = [];
   const stats = slot.player.attributes;
@@ -113,25 +145,34 @@ export function analyzeBuild(slot: ParsedSlot, equipment: ResolvedEquipment): Bu
     advice.push({
       id: 'vigor-good',
       severity: 'good',
-      title: 'Supervivencia bien cubierta',
-      detail: `Vigor ${stats.vigor} es una base sólida para nivel ${level}; no parece el cuello de botella principal de la build.`,
-      evidence: [`Vigor ${stats.vigor}`, `PV máximos ${slot.player.hp.max}`],
+      title: l('Survivability is well covered', 'Supervivencia bien cubierta'),
+      detail: l(
+        `Vigor ${stats.vigor} is a solid base for level ${level}; it does not appear to be the build's main bottleneck.`,
+        `Vigor ${stats.vigor} es una base sólida para nivel ${level}; no parece el cuello de botella principal de la build.`,
+      ),
+      evidence: [`Vigor ${stats.vigor}`, l(`Max HP ${slot.player.hp.max}`, `PV máximos ${slot.player.hp.max}`)],
     });
   } else if (level >= 70 && stats.vigor < 35) {
     advice.push({
       id: 'vigor-low',
       severity: 'warning',
-      title: 'Vigor bajo para el tramo actual',
-      detail: 'Priorizar algunos puntos de Vigor suele aportar más margen de error que repartirlos entre varios atributos ofensivos.',
-      evidence: [`Nivel ${level}`, `Vigor ${stats.vigor}`],
+      title: l('Low Vigor for the current level range', 'Vigor bajo para el tramo actual'),
+      detail: l(
+        'Prioritizing a few Vigor points usually provides more room for error than spreading them across several offensive attributes.',
+        'Priorizar algunos puntos de Vigor suele aportar más margen de error que repartirlos entre varios atributos ofensivos.',
+      ),
+      evidence: [l(`Level ${level}`, `Nivel ${level}`), `Vigor ${stats.vigor}`],
     });
   } else {
     advice.push({
       id: 'vigor-neutral',
       severity: 'info',
-      title: 'Vigor en desarrollo',
-      detail: 'Mantén Vigor acompasado con el nivel antes de abrir otra rama ofensiva.',
-      evidence: [`Nivel ${level}`, `Vigor ${stats.vigor}`],
+      title: l('Vigor is still developing', 'Vigor en desarrollo'),
+      detail: l(
+        'Keep Vigor in step with your level before opening another offensive branch.',
+        'Mantén Vigor acompasado con el nivel antes de abrir otra rama ofensiva.',
+      ),
+      evidence: [l(`Level ${level}`, `Nivel ${level}`), `Vigor ${stats.vigor}`],
     });
   }
 
@@ -139,9 +180,17 @@ export function analyzeBuild(slot: ParsedSlot, equipment: ResolvedEquipment): Bu
     advice.push({
       id: 'fp-tight',
       severity: 'info',
-      title: 'FP ajustado para usar magia o habilidades con frecuencia',
-      detail: 'La combinación de Mente baja y un solo frasco cerúleo es eficiente para un cuerpo a cuerpo con apoyo puntual, pero limita cadenas largas de habilidades o encantamientos.',
-      evidence: [`Mente ${stats.mind}`, `${slot.player.fp.max} FP`, `${slot.player.maxCeruleanFlaskCount} frasco cerúleo`, `${activeSpells.length} hechizos equipados`],
+      title: l('Limited FP for frequent magic or skill use', 'FP ajustado para usar magia o habilidades con frecuencia'),
+      detail: l(
+        'Low Mind and a single Cerulean Flask are efficient for melee with occasional support, but limit long chains of skills or incantations.',
+        'La combinación de Mente baja y un solo frasco cerúleo es eficiente para un cuerpo a cuerpo con apoyo puntual, pero limita cadenas largas de habilidades o encantamientos.',
+      ),
+      evidence: [
+        l(`Mind ${stats.mind}`, `Mente ${stats.mind}`),
+        `${slot.player.fp.max} FP`,
+        l(`${slot.player.maxCeruleanFlaskCount} Cerulean Flask`, `${slot.player.maxCeruleanFlaskCount} frasco cerúleo`),
+        l(`${activeSpells.length} equipped spells`, `${activeSpells.length} hechizos equipados`),
+      ],
     });
   }
 
@@ -149,9 +198,15 @@ export function analyzeBuild(slot: ParsedSlot, equipment: ResolvedEquipment): Bu
     advice.push({
       id: 'bloodstain',
       severity: 'warning',
-      title: 'Hay runas pendientes en la mancha de sangre',
-      detail: 'El save conserva una mancha de sangre con runas. El analizador no modifica nada; solo conviene recordarlo antes de asumir otro riesgo.',
-      evidence: [`${slot.bloodstain.runes.toLocaleString('es-ES')} runas en la mancha`],
+      title: l('Runes are waiting in the bloodstain', 'Hay runas pendientes en la mancha de sangre'),
+      detail: l(
+        'The save contains a bloodstain with runes. The analyzer changes nothing; keep it in mind before taking another risk.',
+        'El save conserva una mancha de sangre con runas. El analizador no modifica nada; solo conviene recordarlo antes de asumir otro riesgo.',
+      ),
+      evidence: [l(
+        `${slot.bloodstain.runes.toLocaleString(localeFor(language))} runes in the bloodstain`,
+        `${slot.bloodstain.runes.toLocaleString(localeFor(language))} runas en la mancha`,
+      )],
     });
   }
 
@@ -159,17 +214,29 @@ export function analyzeBuild(slot: ParsedSlot, equipment: ResolvedEquipment): Bu
     advice.push({
       id: 'empty-talisman-slot',
       severity: 'warning',
-      title: 'Hay una ranura de talismán libre',
-      detail: 'Equipar cualquier talismán útil aporta una mejora gratuita sin gastar niveles.',
-      evidence: [`${activeTalismans.length}/${totalTalismanSlots} ranuras ocupadas`],
+      title: l('A talisman slot is empty', 'Hay una ranura de talismán libre'),
+      detail: l(
+        'Equipping any useful talisman provides a free improvement without spending levels.',
+        'Equipar cualquier talismán útil aporta una mejora gratuita sin gastar niveles.',
+      ),
+      evidence: [l(
+        `${activeTalismans.length}/${totalTalismanSlots} slots occupied`,
+        `${activeTalismans.length}/${totalTalismanSlots} ranuras ocupadas`,
+      )],
     });
   } else {
     advice.push({
       id: 'talisman-slots-used',
       severity: 'good',
-      title: 'Ranuras de talismán aprovechadas',
-      detail: `Las ${totalTalismanSlots} ranuras disponibles están ocupadas.`,
-      evidence: [`${activeTalismans.length}/${totalTalismanSlots} ranuras ocupadas`],
+      title: l('Talisman slots are in use', 'Ranuras de talismán aprovechadas'),
+      detail: l(
+        `All ${totalTalismanSlots} available slots are occupied.`,
+        `Las ${totalTalismanSlots} ranuras disponibles están ocupadas.`,
+      ),
+      evidence: [l(
+        `${activeTalismans.length}/${totalTalismanSlots} slots occupied`,
+        `${activeTalismans.length}/${totalTalismanSlots} ranuras ocupadas`,
+      )],
     });
   }
 
@@ -178,17 +245,23 @@ export function analyzeBuild(slot: ParsedSlot, equipment: ResolvedEquipment): Bu
     advice.push({
       id: 'physick-incomplete',
       severity: 'warning',
-      title: 'El Físico Maravilloso está incompleto',
-      detail: 'Puede llevar dos lágrimas. Completar la mezcla es una mejora sin coste de atributos.',
-      evidence: [`${tearsEquipped}/2 lágrimas equipadas`],
+      title: l('The Flask of Wondrous Physick is incomplete', 'El Físico Maravilloso está incompleto'),
+      detail: l(
+        'It can hold two tears. Completing the mixture is an improvement with no attribute cost.',
+        'Puede llevar dos lágrimas. Completar la mezcla es una mejora sin coste de atributos.',
+      ),
+      evidence: [l(`${tearsEquipped}/2 tears equipped`, `${tearsEquipped}/2 lágrimas equipadas`)],
     });
   } else {
     advice.push({
       id: 'physick-complete',
       severity: 'good',
-      title: 'Físico Maravilloso completo',
-      detail: 'Hay dos lágrimas equipadas; revisa que apoyen el plan de la build y no solo que ocupen el hueco.',
-      evidence: [`${tearsEquipped}/2 lágrimas equipadas`],
+      title: l('Flask of Wondrous Physick complete', 'Físico Maravilloso completo'),
+      detail: l(
+        'Two tears are equipped; check that they support the build plan rather than merely filling the slots.',
+        'Hay dos lágrimas equipadas; revisa que apoyen el plan de la build y no solo que ocupen el hueco.',
+      ),
+      evidence: [l(`${tearsEquipped}/2 tears equipped`, `${tearsEquipped}/2 lágrimas equipadas`)],
     });
   }
 
@@ -196,16 +269,22 @@ export function analyzeBuild(slot: ParsedSlot, equipment: ResolvedEquipment): Bu
     advice.push({
       id: 'weapon-upgrade-unknown',
       severity: 'warning',
-      title: 'El arma principal parece sin mejorar',
-      detail: 'Mejorar el arma suele aportar más daño inmediato que varios niveles ofensivos. Comprueba que el arma realmente equipada sea la que quieres usar.',
+      title: l('The main weapon appears unupgraded', 'El arma principal parece sin mejorar'),
+      detail: l(
+        'Upgrading a weapon usually adds more immediate damage than several offensive levels. Check that the equipped weapon is the one you intend to use.',
+        'Mejorar el arma suele aportar más daño inmediato que varios niveles ofensivos. Comprueba que el arma realmente equipada sea la que quieres usar.',
+      ),
       evidence: activeWeapons.slice(0, 3).map((item) => item.name),
     });
   } else if (mainUpgrade > 0) {
     advice.push({
       id: 'weapon-upgrade',
       severity: 'good',
-      title: 'El arma equipada está mejorada',
-      detail: `La mejora más alta detectada entre las armas equipadas es +${mainUpgrade}.`,
+      title: l('The equipped weapon is upgraded', 'El arma equipada está mejorada'),
+      detail: l(
+        `The highest upgrade detected among equipped weapons is +${mainUpgrade}.`,
+        `La mejora más alta detectada entre las armas equipadas es +${mainUpgrade}.`,
+      ),
       evidence: activeWeapons.filter((item) => item.upgradeLevel === mainUpgrade).map((item) => `${item.name} +${item.upgradeLevel}`),
     });
   }
@@ -220,9 +299,22 @@ export function analyzeBuild(slot: ParsedSlot, equipment: ResolvedEquipment): Bu
     advice.push({
       id: 'allocation-inconsistent',
       severity: 'info',
-      title: 'La clase inicial o el nivel no cuadran con la tabla base',
-      detail: 'Puede deberse a una variante del formato, equipo que modifica atributos o datos alterados. El análisis evita llamar “desperdiciado” a ningún punto en ese caso.',
-      evidence: [`Clase ${STARTING_CLASSES[slot.player.archetypeCode] ?? `código ${slot.player.archetypeCode}`}`, `Nivel esperado ${allocation.expectedLevel}`, `Nivel guardado ${level}`],
+      title: l(
+        'The starting class or level does not match the base table',
+        'La clase inicial o el nivel no cuadran con la tabla base',
+      ),
+      detail: l(
+        'This may be caused by a format variant, attribute-modifying equipment, or altered data. In that case, the analysis avoids calling any point “wasted.”',
+        'Puede deberse a una variante del formato, equipo que modifica atributos o datos alterados. El análisis evita llamar “desperdiciado” a ningún punto en ese caso.',
+      ),
+      evidence: [
+        l(
+          `Class ${STARTING_CLASSES[slot.player.archetypeCode] ?? `code ${slot.player.archetypeCode}`}`,
+          `Clase ${STARTING_CLASSES[slot.player.archetypeCode] ?? `código ${slot.player.archetypeCode}`}`,
+        ),
+        l(`Expected level ${allocation.expectedLevel}`, `Nivel esperado ${allocation.expectedLevel}`),
+        l(`Stored level ${level}`, `Nivel guardado ${level}`),
+      ],
     });
   }
 
@@ -235,8 +327,8 @@ export function analyzeBuild(slot: ParsedSlot, equipment: ResolvedEquipment): Bu
   };
 }
 
-export function getStartingClassName(code: number): string {
-  return STARTING_CLASSES[code] ?? `Clase desconocida (${code})`;
+export function getStartingClassName(code: number, language: AppLanguage = DEFAULT_LANGUAGE): string {
+  return STARTING_CLASSES[code] ?? localize(language, `Unknown class (${code})`, `Clase desconocida (${code})`);
 }
 
 /** Exact community-reversed FromSoftware rune curve for L → L+1. */

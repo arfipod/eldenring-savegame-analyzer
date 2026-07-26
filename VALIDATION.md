@@ -7,7 +7,7 @@ Date: 2026-07-26
 - The binary parser and semantic/export layers passed strict TypeScript compilation.
 - The React UI, Web Worker and Vite configuration passed strict TypeScript smoke-checks using temporary declarations for external packages.
 - The unit-test sources passed strict TypeScript compilation.
-- Thirteen unit assertions were executed for MD5, rune costs, event-flag addressing, fallback catalog IDs, privacy redaction and spoiler enforcement.
+- Nineteen unit assertions were executed for MD5, rune costs, event-flag addressing, fallback catalog IDs, catalog encoding, privacy redaction, spoiler enforcement, and English/Spanish localization.
 - The enriched catalog adapter for tools, consumables and materials passed strict TypeScript compilation; its three pinned JSON endpoints were verified to exist at the recorded revisions.
 - An end-to-end smoke test parsed the supplied real PC save, verified its stored slot MD5 and asserted representative identity, build, equipment, inventory and export results.
 - Default semantic and forensic exports were searched for the real Steam IDs, precise coordinates, event bitfield, checksum digests and low-level entity/offset fields. None were present.

@@ -21,6 +21,7 @@ workerScope.onmessage = (event: MessageEvent<WorkerParseRequest>) => {
         const response: WorkerParseResponse = { type: 'progress', stage, fraction };
         workerScope.postMessage(response);
       },
+      request.language,
     );
     const response: WorkerParseResponse = { type: 'success', save };
     workerScope.postMessage(response);

@@ -52,7 +52,7 @@ export const fallbackCatalog: SemanticCatalog = {
     '14002950': 'Academy of Raya Lucaria — Raya Lucaria Grand Library',
     '14002951': 'Academy of Raya Lucaria — Debate Parlor',
   },
-  loadedSources: ['fallback integrado'],
+  loadedSources: ['built-in fallback'],
   warnings: [],
 };
 

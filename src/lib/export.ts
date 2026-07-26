@@ -8,6 +8,8 @@ import type {
   SemanticSlot,
 } from '../types';
 import { formatDuration, formatNumber, safeFilename } from './format';
+import type { AppLanguage } from './i18n';
+import { DEFAULT_LANGUAGE, localize } from './i18n';
 import { missingProgressEntries, toHexId } from './semantic';
 
 export type SpoilerMode = 'safe' | 'zones' | 'precise' | 'completion';
@@ -18,6 +20,7 @@ export interface ExportContext {
   catalog: SemanticCatalog;
   privacy: ExportPrivacyOptions;
   spoilerMode: SpoilerMode;
+  language?: AppLanguage;
 }
 
 function withoutUndefined<T extends Record<string, unknown>>(input: T): T {
@@ -33,16 +36,19 @@ function encodeBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-const INTERNAL_LABEL_PATTERN = /^(?:ID(?: de ceniza)?|Hechizo|Ceniza|Entidad de gracia|Clase desconocida|Mapa m\d)\b|\b0x[0-9a-f]{4,}\b/i;
+const INTERNAL_LABEL_PATTERN = /^(?:ID(?: de ceniza)?|Ash ID|Hechizo|Spell|Ceniza|Ash|Entidad de gracia|Site of Grace entity|Clase desconocida|Unknown class|Mapa m\d|Map m\d)\b|\b0x[0-9a-f]{4,}\b/i;
 
-function unresolvedItemLabel(type: ResolvedEquipmentItem['type'] | ResolvedInventoryItem['type']): string {
+function unresolvedItemLabel(
+  type: ResolvedEquipmentItem['type'] | ResolvedInventoryItem['type'],
+  language: AppLanguage,
+): string {
   switch (type) {
-    case 'weapon': return 'Arma o catalizador sin resolver';
-    case 'armor': return 'Pieza de armadura sin resolver';
-    case 'talisman': return 'Talismán sin resolver';
-    case 'ashOfWar': return 'Ceniza de guerra sin resolver';
-    case 'good': return 'Objeto o magia sin resolver';
-    default: return 'Objeto sin resolver';
+    case 'weapon': return localize(language, 'Unresolved weapon or catalyst', 'Arma o catalizador sin resolver');
+    case 'armor': return localize(language, 'Unresolved armor piece', 'Pieza de armadura sin resolver');
+    case 'talisman': return localize(language, 'Unresolved talisman', 'Talismán sin resolver');
+    case 'ashOfWar': return localize(language, 'Unresolved Ash of War', 'Ceniza de guerra sin resolver');
+    case 'good': return localize(language, 'Unresolved item or spell', 'Objeto o magia sin resolver');
+    default: return localize(language, 'Unresolved item', 'Objeto sin resolver');
   }
 }
 
@@ -50,19 +56,27 @@ function exportLabel(label: string, includeIds: boolean, fallback: string): stri
   return !includeIds && INTERNAL_LABEL_PATTERN.test(label) ? fallback : label;
 }
 
-function exportEvidence(label: string, includeIds: boolean): string {
+function exportEvidence(label: string, includeIds: boolean, language: AppLanguage): string {
   return !includeIds && INTERNAL_LABEL_PATTERN.test(label)
-    ? 'Evidencia basada en un identificador interno no exportado.'
+    ? localize(
+        language,
+        'Evidence based on an internal identifier that was not exported.',
+        'Evidencia basada en un identificador interno no exportado.',
+      )
     : label;
 }
 
-function equipmentItem(item: ResolvedEquipmentItem, includeIds: boolean): Record<string, unknown> {
+function equipmentItem(item: ResolvedEquipmentItem, includeIds: boolean, language: AppLanguage): Record<string, unknown> {
   return withoutUndefined({
-    name: exportLabel(item.name, includeIds, unresolvedItemLabel(item.type)),
+    name: exportLabel(item.name, includeIds, unresolvedItemLabel(item.type, language)),
     type: item.type,
     upgradeLevel: item.upgradeLevel,
     ashOfWar: item.ashOfWar
-      ? exportLabel(item.ashOfWar.name, includeIds, 'Ceniza de guerra sin resolver')
+      ? exportLabel(
+          item.ashOfWar.name,
+          includeIds,
+          localize(language, 'Unresolved Ash of War', 'Ceniza de guerra sin resolver'),
+        )
       : undefined,
     semanticSummary: item.semanticSummary,
     semanticDescription: item.semanticDescription,
@@ -77,9 +91,9 @@ function equipmentItem(item: ResolvedEquipmentItem, includeIds: boolean): Record
   });
 }
 
-function inventoryItem(item: ResolvedInventoryItem, includeIds: boolean): Record<string, unknown> {
+function inventoryItem(item: ResolvedInventoryItem, includeIds: boolean, language: AppLanguage): Record<string, unknown> {
   return withoutUndefined({
-    name: exportLabel(item.name, includeIds, unresolvedItemLabel(item.type)),
+    name: exportLabel(item.name, includeIds, unresolvedItemLabel(item.type, language)),
     quantity: item.quantity,
     type: item.type,
     category: item.category,
@@ -96,7 +110,11 @@ function inventoryItem(item: ResolvedInventoryItem, includeIds: boolean): Record
     keyItem: item.keyItem,
     equipped: item.equipped,
     ashOfWar: item.ashOfWar
-      ? exportLabel(item.ashOfWar.name, includeIds, 'Ceniza de guerra sin resolver')
+      ? exportLabel(
+          item.ashOfWar.name,
+          includeIds,
+          localize(language, 'Unresolved Ash of War', 'Ceniza de guerra sin resolver'),
+        )
       : undefined,
     semanticConfidence: item.confidence,
     ...(includeIds
@@ -114,9 +132,10 @@ function inventoryItem(item: ResolvedInventoryItem, includeIds: boolean): Record
 function progressEntry(
   entry: { name: string; flagId: number; category?: string; subcategory?: string },
   includeIds: boolean,
+  language: AppLanguage,
 ): Record<string, unknown> {
   return withoutUndefined({
-    name: exportLabel(entry.name, includeIds, 'Hito sin resolver'),
+    name: exportLabel(entry.name, includeIds, localize(language, 'Unresolved milestone', 'Hito sin resolver')),
     category: entry.category,
     subcategory: entry.subcategory,
     ...(includeIds ? { eventFlagId: entry.flagId } : {}),
@@ -124,6 +143,7 @@ function progressEntry(
 }
 
 function buildPendingProgress(context: ExportContext): Record<string, unknown> | undefined {
+  const language = context.language ?? DEFAULT_LANGUAGE;
   if (context.spoilerMode !== 'completion' && context.spoilerMode !== 'precise') return undefined;
   const parsed = context.slot.raw;
   const groups = {
@@ -142,7 +162,7 @@ function buildPendingProgress(context: ExportContext): Record<string, unknown> |
   return Object.fromEntries(
     Object.entries(groups).map(([key, entries]) => [
       key,
-      entries.map((entry) => progressEntry(entry, context.privacy.includeRawInternalIds)),
+      entries.map((entry) => progressEntry(entry, context.privacy.includeRawInternalIds, language)),
     ]),
   );
 }
@@ -170,6 +190,8 @@ function inventorySummary(items: ResolvedInventoryItem[]): Record<string, unknow
 
 export function buildSemanticExport(context: ExportContext): Record<string, unknown> {
   const { save, slot, privacy, spoilerMode } = context;
+  const language = context.language ?? DEFAULT_LANGUAGE;
+  const l = (english: string, spanish: string) => localize(language, english, spanish);
   const raw = slot.raw;
   const includeIds = privacy.includeRawInternalIds;
   const pending = buildPendingProgress(context);
@@ -177,12 +199,18 @@ export function buildSemanticExport(context: ExportContext): Record<string, unkn
   return withoutUndefined({
     schema: 'eldenring-savegame-analyzer.semantic.v1',
     generatedAt: new Date().toISOString(),
-    intendedUse: 'Datos estructurados para revisión humana o análisis asistido por IA.',
+    intendedUse: l(
+      'Structured data for human review or AI-assisted analysis.',
+      'Datos estructurados para revisión humana o análisis asistido por IA.',
+    ),
     methodology: {
       saveFormat: 'Elden Ring PC BND4 (.sl2/.co2)',
-      access: 'Solo lectura; procesado en el navegador.',
+      access: l('Read-only; processed in the browser.', 'Solo lectura; procesado en el navegador.'),
       achievementsNotice:
-        'Los hitos se infieren desde inventario y banderas del save. No equivalen necesariamente al historial oficial de logros de Steam.',
+        l(
+          'Milestones are inferred from inventory and save flags. They are not necessarily equivalent to the official Steam achievement history.',
+          'Los hitos se infieren desde inventario y banderas del save. No equivalen necesariamente al historial oficial de logros de Steam.',
+        ),
       spoilerPolicy: spoilerMode,
       semanticCatalogSources: context.catalog.loadedSources,
       semanticWarnings: context.catalog.warnings,
@@ -214,7 +242,11 @@ export function buildSemanticExport(context: ExportContext): Record<string, unkn
     character: {
       name: slot.identity.name,
       level: slot.identity.level,
-      startingClass: exportLabel(slot.identity.className, includeIds, 'Clase inicial sin resolver'),
+      startingClass: exportLabel(
+        slot.identity.className,
+        includeIds,
+        l('Unresolved starting class', 'Clase inicial sin resolver'),
+      ),
       classCode: includeIds ? slot.identity.classCode : undefined,
       bodyTypeCode: includeIds ? slot.identity.genderCode : undefined,
       playtimeSeconds: slot.identity.playtimeSeconds,
@@ -235,8 +267,8 @@ export function buildSemanticExport(context: ExportContext): Record<string, unkn
         total: slot.overview.totalFlasks,
       },
       talismanSlots: slot.overview.talismanSlots,
-      lastRestedGrace: exportLabel(slot.overview.lastRestedGrace, includeIds, 'Gracia sin resolver'),
-      mapLabel: exportLabel(slot.overview.mapLabel, includeIds, 'Mapa sin resolver'),
+      lastRestedGrace: exportLabel(slot.overview.lastRestedGrace, includeIds, l('Unresolved Site of Grace', 'Gracia sin resolver')),
+      mapLabel: exportLabel(slot.overview.mapLabel, includeIds, l('Unresolved map', 'Mapa sin resolver')),
       worldTime: slot.overview.worldTime,
       shadowOfTheErdtreeFlag: slot.overview.dlcOwned,
       matchmakingWeaponLevel: raw.player.matchmakingWeaponLevel,
@@ -264,49 +296,52 @@ export function buildSemanticExport(context: ExportContext): Record<string, unkn
       focusScore: slot.build.levelEfficiency,
       observations: slot.build.advice.map((item) => ({
         ...item,
-        evidence: item.evidence.map((entry) => exportEvidence(entry, includeIds)),
+        evidence: item.evidence.map((entry) => exportEvidence(entry, includeIds, language)),
       })),
     },
     equipment: {
-      rightHand: slot.equipment.rightHand.map((item) => equipmentItem(item, includeIds)),
-      leftHand: slot.equipment.leftHand.map((item) => equipmentItem(item, includeIds)),
+      rightHand: slot.equipment.rightHand.map((item) => equipmentItem(item, includeIds, language)),
+      leftHand: slot.equipment.leftHand.map((item) => equipmentItem(item, includeIds, language)),
       armor: Object.fromEntries(
-        Object.entries(slot.equipment.armor).map(([key, item]) => [key, equipmentItem(item, includeIds)]),
+        Object.entries(slot.equipment.armor).map(([key, item]) => [key, equipmentItem(item, includeIds, language)]),
       ),
-      talismans: slot.equipment.talismans.map((item) => equipmentItem(item, includeIds)),
-      quickSlots: slot.equipment.quickSlots.map((item) => equipmentItem(item, includeIds)),
-      pouch: slot.equipment.pouch.map((item) => equipmentItem(item, includeIds)),
-      wondrousPhysickTears: slot.equipment.physickTears.map((item) => equipmentItem(item, includeIds)),
+      talismans: slot.equipment.talismans.map((item) => equipmentItem(item, includeIds, language)),
+      quickSlots: slot.equipment.quickSlots.map((item) => equipmentItem(item, includeIds, language)),
+      pouch: slot.equipment.pouch.map((item) => equipmentItem(item, includeIds, language)),
+      wondrousPhysickTears: slot.equipment.physickTears.map((item) => equipmentItem(item, includeIds, language)),
       spells: slot.equipment.spells
         .filter((spell) => spell.id !== 0 && spell.id !== 0xffff_ffff)
         .map((spell) => ({
-          name: exportLabel(spell.name, includeIds, 'Hechizo sin resolver'),
+          name: exportLabel(spell.name, includeIds, l('Unresolved spell', 'Hechizo sin resolver')),
           ...(includeIds ? { id: spell.id, gameId: `0x${spell.hexId}` } : {}),
         })),
     },
     inventory: {
       summary: inventorySummary(slot.inventory),
-      items: slot.inventory.map((item) => inventoryItem(item, includeIds)),
+      items: slot.inventory.map((item) => inventoryItem(item, includeIds, language)),
     },
     progress: withoutUndefined({
-      interpretation: 'Solo se enumeran hitos ya presentes en el save salvo que el modo completista esté activado.',
-      defeatedBosses: slot.progress.defeatedBosses.map((entry) => progressEntry(entry, includeIds)),
-      discoveredGraces: slot.progress.discoveredGraces.map((entry) => progressEntry(entry, includeIds)),
-      acquiredCookbooks: slot.progress.acquiredCookbooks.map((entry) => progressEntry(entry, includeIds)),
-      acquiredBellBearings: slot.progress.acquiredBellBearings.map((entry) => progressEntry(entry, includeIds)),
-      acquiredWhetblades: slot.progress.acquiredWhetblades.map((entry) => progressEntry(entry, includeIds)),
+      interpretation: l(
+        'Only milestones already present in the save are listed unless completionist mode is enabled.',
+        'Solo se enumeran hitos ya presentes en el save salvo que el modo completista esté activado.',
+      ),
+      defeatedBosses: slot.progress.defeatedBosses.map((entry) => progressEntry(entry, includeIds, language)),
+      discoveredGraces: slot.progress.discoveredGraces.map((entry) => progressEntry(entry, includeIds, language)),
+      acquiredCookbooks: slot.progress.acquiredCookbooks.map((entry) => progressEntry(entry, includeIds, language)),
+      acquiredBellBearings: slot.progress.acquiredBellBearings.map((entry) => progressEntry(entry, includeIds, language)),
+      acquiredWhetblades: slot.progress.acquiredWhetblades.map((entry) => progressEntry(entry, includeIds, language)),
       knownCatalogTotals: slot.progress.totals,
       pendingContent: pending,
     }),
     parserCoverage: {
       decodedGroups: [
-        'identidad y perfiles',
-        'atributos, nivel y recursos',
-        'equipo, hechizos, inventario y almacén',
-        'frascos, Físico Maravilloso y efectos activos',
-        'muertes, mancha de sangre, regiones y posición',
-        'banderas de progreso conocidas',
-        'estado del mundo, montura, DLC e integridad MD5',
+        l('identity and profiles', 'identidad y perfiles'),
+        l('attributes, level, and resources', 'atributos, nivel y recursos'),
+        l('equipment, spells, inventory, and storage', 'equipo, hechizos, inventario y almacén'),
+        l('flasks, Flask of Wondrous Physick, and active effects', 'frascos, Físico Maravilloso y efectos activos'),
+        l('deaths, bloodstain, regions, and position', 'muertes, mancha de sangre, regiones y posición'),
+        l('known progress flags', 'banderas de progreso conocidas'),
+        l('world state, mount, DLC, and MD5 integrity', 'estado del mundo, montura, DLC e integridad MD5'),
       ],
       opaqueSectionIndex: raw.opaqueSections.map((section) => ({
         name: section.name,
@@ -314,7 +349,10 @@ export function buildSemanticExport(context: ExportContext): Record<string, unkn
         ...(includeIds ? { offset: section.offset } : {}),
       })),
       caveat:
-        'El save contiene blobs internos y campos todavía sin semántica pública fiable. Se indexan como opacos en vez de inventar un significado.',
+        l(
+          'The save contains internal blobs and fields that still lack reliable public semantics. They are indexed as opaque instead of being assigned an invented meaning.',
+          'El save contiene blobs internos y campos todavía sin semántica pública fiable. Se indexan como opacos en vez de inventar un significado.',
+        ),
     },
     rawEventFlags: privacy.includeRawEventFlags
       ? {
@@ -444,6 +482,7 @@ function serializableSlot(slot: ParsedSlot, privacy: ExportPrivacyOptions): Reco
 }
 
 export function buildForensicExport(context: ExportContext): Record<string, unknown> {
+  const language = context.language ?? DEFAULT_LANGUAGE;
   const semantic = buildSemanticExport({
     ...context,
     privacy: { ...context.privacy, includeRawEventFlags: false },
@@ -451,7 +490,11 @@ export function buildForensicExport(context: ExportContext): Record<string, unkn
   return {
     schema: 'eldenring-savegame-analyzer.forensic.v1',
     generatedAt: new Date().toISOString(),
-    warning: 'Exportación técnica de solo lectura. No debe usarse para reescribir una partida.',
+    warning: localize(
+      language,
+      'Read-only technical export. It must not be used to rewrite a save file.',
+      'Exportación técnica de solo lectura. No debe usarse para reescribir una partida.',
+    ),
     semantic,
     parsedSave: withoutUndefined({
       schemaVersion: context.save.schemaVersion,
@@ -465,95 +508,120 @@ export function buildForensicExport(context: ExportContext): Record<string, unkn
   };
 }
 
-function listNames(items: Array<{ name: string }>, maximum = 20): string {
-  if (items.length === 0) return 'Ninguno detectado.';
+function listNames(items: Array<{ name: string }>, language: AppLanguage, maximum = 20): string {
+  if (items.length === 0) return localize(language, 'None detected.', 'Ninguno detectado.');
   const names = items.slice(0, maximum).map((item) => item.name);
   const remaining = items.length - names.length;
-  return `${names.join(', ')}${remaining > 0 ? `, y ${remaining} más` : ''}.`;
+  return `${names.join(', ')}${remaining > 0
+    ? localize(language, `, and ${remaining} more`, `, y ${remaining} más`)
+    : ''}.`;
 }
 
 function markdownPendingProgress(context: ExportContext): string {
   if (context.spoilerMode !== 'precise' && context.spoilerMode !== 'completion') return '';
+  const language = context.language ?? DEFAULT_LANGUAGE;
+  const l = (english: string, spanish: string) => localize(language, english, spanish);
   const groups = [
-    ['Jefes/hitos', missingProgressEntries(context.catalog.bosses, context.slot.raw, context.catalog)],
-    ['Lugares de gracia', missingProgressEntries(context.catalog.graces, context.slot.raw, context.catalog)],
-    ['Libros de recetas', missingProgressEntries(context.catalog.cookbooks, context.slot.raw, context.catalog)],
-    ['Rodamientos de campana', missingProgressEntries(context.catalog.bellBearings, context.slot.raw, context.catalog)],
-    ['Hojas de afilar', missingProgressEntries(context.catalog.whetblades, context.slot.raw, context.catalog)],
+    [l('Bosses/milestones', 'Jefes/hitos'), missingProgressEntries(context.catalog.bosses, context.slot.raw, context.catalog)],
+    [l('Sites of Grace', 'Lugares de gracia'), missingProgressEntries(context.catalog.graces, context.slot.raw, context.catalog)],
+    [l('Cookbooks', 'Libros de recetas'), missingProgressEntries(context.catalog.cookbooks, context.slot.raw, context.catalog)],
+    [l('Bell bearings', 'Rodamientos de campana'), missingProgressEntries(context.catalog.bellBearings, context.slot.raw, context.catalog)],
+    [l('Whetblades', 'Hojas de afilar'), missingProgressEntries(context.catalog.whetblades, context.slot.raw, context.catalog)],
   ] as const;
 
   if (context.spoilerMode === 'precise') {
     return `
-## Contenido no detectado — recuentos sin nombres
+## ${l('Undetected content — unnamed counts', 'Contenido no detectado — recuentos sin nombres')}
 
 ${groups
-      .map(([label, entries]) => `- ${label}: **${formatNumber(entries.length)}**.`)
+      .map(([label, entries]) => `- ${label}: **${formatNumber(entries.length, language)}**.`)
       .join('\n')}
 `;
   }
 
   return `
-## Contenido no detectado — modo completista
+## ${l('Undetected content — completionist mode', 'Contenido no detectado — modo completista')}
 
-> Esta sección puede revelar nombres de contenido futuro.
+> ${l('This section may reveal the names of future content.', 'Esta sección puede revelar nombres de contenido futuro.')}
 
 ${groups
-    .map(([label, entries]) => `- ${label}: ${listNames(entries, 150)}`)
+    .map(([label, entries]) => `- ${label}: ${listNames(entries, language, 150)}`)
     .join('\n')}
 `;
 }
 
 export function buildMarkdownReport(context: ExportContext): string {
   const { slot } = context;
+  const language = context.language ?? DEFAULT_LANGUAGE;
+  const l = (english: string, spanish: string) => localize(language, english, spanish);
   const includeIds = context.privacy.includeRawInternalIds;
   const mainWeapons = [...slot.equipment.rightHand, ...slot.equipment.leftHand]
-    .filter((item) => item.handle !== 0 && item.name !== 'Mano desnuda')
-    .map((item) => ({ name: exportLabel(item.name, includeIds, unresolvedItemLabel(item.type)) }));
+    .filter((item) => item.handle !== 0 && item.name !== 'Mano desnuda' && item.name !== 'Bare hands')
+    .map((item) => ({ name: exportLabel(item.name, includeIds, unresolvedItemLabel(item.type, language)) }));
   const activeTalismans = slot.equipment.talismans
     .filter((item) => item.handle !== 0)
-    .map((item) => ({ name: exportLabel(item.name, includeIds, unresolvedItemLabel(item.type)) }));
+    .map((item) => ({ name: exportLabel(item.name, includeIds, unresolvedItemLabel(item.type, language)) }));
   const activeSpells = slot.equipment.spells
     .filter((spell) => spell.id !== 0 && spell.id !== 0xffff_ffff)
-    .map((spell) => ({ name: exportLabel(spell.name, includeIds, 'Hechizo sin resolver') }));
+    .map((spell) => ({ name: exportLabel(spell.name, includeIds, l('Unresolved spell', 'Hechizo sin resolver')) }));
   const physickTears = slot.equipment.physickTears
     .filter((item) => item.handle !== 0)
-    .map((item) => ({ name: exportLabel(item.name, includeIds, unresolvedItemLabel(item.type)) }));
+    .map((item) => ({ name: exportLabel(item.name, includeIds, unresolvedItemLabel(item.type, language)) }));
   const advice = slot.build.advice
-    .map((item) => `- **${item.title}:** ${item.detail} _Evidencia: ${item.evidence.map((entry) => exportEvidence(entry, includeIds)).join('; ')}._`)
+    .map((item) => `- **${item.title}:** ${item.detail} _${l('Evidence', 'Evidencia')}: ${item.evidence.map((entry) => exportEvidence(entry, includeIds, language)).join('; ')}._`)
     .join('\n');
+  const attributeLabels: Record<string, string> = {
+    vigor: 'vigor',
+    mind: l('mind', 'mente'),
+    endurance: l('endurance', 'aguante'),
+    strength: l('strength', 'fuerza'),
+    dexterity: l('dexterity', 'destreza'),
+    intelligence: l('intelligence', 'inteligencia'),
+    faith: l('faith', 'fe'),
+    arcane: l('arcane', 'arcano'),
+  };
   const attributes = Object.entries(slot.attributes)
-    .map(([key, value]) => `${key} ${value}`)
+    .map(([key, value]) => `${attributeLabels[key] ?? key} ${value}`)
     .join(', ');
   const pendingProgress = markdownPendingProgress(context);
 
-  return `# Informe de partida de Elden Ring — ${slot.identity.name}\n\n` +
-    `> Generado localmente por Elden Ring Savegame Analyzer. No es un editor de partidas. Los hitos se infieren desde el save y no sustituyen al historial oficial de Steam.\n\n` +
-    `## Instrucciones para el modelo\n\n` +
-    `Analiza esta partida con recomendaciones prácticas y verificables. No reveles contenido futuro que no aparezca ya como descubierto o derrotado. Distingue hechos extraídos, inferencias y recomendaciones. No propongas editar el save ni usar mods.\n\n` +
-    `## Resumen\n\n` +
-    `- Personaje: **${slot.identity.name}**, nivel **${slot.identity.level}**, clase inicial **${exportLabel(slot.identity.className, includeIds, 'sin resolver')}**.\n` +
-    `- Tiempo: **${formatDuration(slot.identity.playtimeSeconds)}**. Muertes: **${formatNumber(slot.overview.deaths)}**.\n` +
-    `- Runas actuales: **${formatNumber(slot.overview.currentRunes)}**; acumuladas: **${formatNumber(slot.overview.lifetimeRunes)}**; en mancha: **${formatNumber(slot.overview.bloodstainRunes)}**.\n` +
-    `- Última gracia: **${exportLabel(slot.overview.lastRestedGrace, includeIds, 'sin resolver')}**.\n` +
-    `- Frascos: **${slot.overview.crimsonFlasks} carmesí + ${slot.overview.ceruleanFlasks} cerúleo**. Talismán: **${slot.overview.talismanSlots} ranuras**.\n\n` +
-    `## Atributos y build\n\n` +
-    `Atributos: ${attributes}.\n\n` +
-    `Interpretación: **${slot.build.archetype}**. ${slot.build.summary}\n\n` +
-    `${advice || '- Sin observaciones automáticas.'}\n\n` +
-    `## Equipo\n\n` +
-    `- Armas: ${listNames(mainWeapons)}\n` +
-    `- Talismanes: ${listNames(activeTalismans)}\n` +
-    `- Hechizos: ${listNames(activeSpells)}\n` +
-    `- Lágrimas del Físico: ${listNames(physickTears)}\n\n` +
-    `## Inventario\n\n` +
-    `Se han resuelto **${slot.inventory.length} entradas**; ${slot.inventory.filter((item) => item.keyItem).length} son objetos clave y ${slot.inventory.filter((item) => item.storage === 'chest').length} están en el baúl.\n\n` +
-    `${slot.inventory.map((item) => `- ${exportLabel(item.name, includeIds, unresolvedItemLabel(item.type))}${item.upgradeLevel ? ` +${item.upgradeLevel}` : ''} ×${item.quantity} — ${item.storage}${item.keyItem ? ', clave' : ''}${item.equipped ? ', equipado' : ''}`).join('\n')}\n\n` +
-    `## Progreso ya detectado\n\n` +
-    `- Jefes/hitos derrotados: ${listNames(slot.progress.defeatedBosses, 100)}\n` +
-    `- Lugares de gracia descubiertos: ${listNames(slot.progress.discoveredGraces, 100)}\n` +
-    `- Libros de recetas: ${listNames(slot.progress.acquiredCookbooks, 100)}\n` +
-    `- Rodamientos de campana: ${listNames(slot.progress.acquiredBellBearings, 100)}\n` +
-    `- Hojas de afilar: ${listNames(slot.progress.acquiredWhetblades, 100)}\n` +
+  return `# ${l('Elden Ring save report', 'Informe de partida de Elden Ring')} — ${slot.identity.name}\n\n` +
+    `> ${l(
+      'Generated locally by Elden Ring Savegame Analyzer. This is not a save editor. Milestones are inferred from the save and do not replace the official Steam achievement history.',
+      'Generado localmente por Elden Ring Savegame Analyzer. No es un editor de partidas. Los hitos se infieren desde el save y no sustituyen al historial oficial de Steam.',
+    )}\n\n` +
+    `## ${l('Instructions for the model', 'Instrucciones para el modelo')}\n\n` +
+    `${l(
+      'Analyze this save with practical, verifiable recommendations. Do not reveal future content that is not already marked as discovered or defeated. Distinguish extracted facts, inferences, and recommendations. Do not suggest editing the save or using mods.',
+      'Analiza esta partida con recomendaciones prácticas y verificables. No reveles contenido futuro que no aparezca ya como descubierto o derrotado. Distingue hechos extraídos, inferencias y recomendaciones. No propongas editar el save ni usar mods.',
+    )}\n\n` +
+    `## ${l('Summary', 'Resumen')}\n\n` +
+    `- ${l('Character', 'Personaje')}: **${slot.identity.name}**, ${l('level', 'nivel')} **${slot.identity.level}**, ${l('starting class', 'clase inicial')} **${exportLabel(slot.identity.className, includeIds, l('unresolved', 'sin resolver'))}**.\n` +
+    `- ${l('Play time', 'Tiempo')}: **${formatDuration(slot.identity.playtimeSeconds)}**. ${l('Deaths', 'Muertes')}: **${formatNumber(slot.overview.deaths, language)}**.\n` +
+    `- ${l('Current runes', 'Runas actuales')}: **${formatNumber(slot.overview.currentRunes, language)}**; ${l('lifetime', 'acumuladas')}: **${formatNumber(slot.overview.lifetimeRunes, language)}**; ${l('in bloodstain', 'en mancha')}: **${formatNumber(slot.overview.bloodstainRunes, language)}**.\n` +
+    `- ${l('Last Site of Grace', 'Última gracia')}: **${exportLabel(slot.overview.lastRestedGrace, includeIds, l('unresolved', 'sin resolver'))}**.\n` +
+    `- ${l('Flasks', 'Frascos')}: **${slot.overview.crimsonFlasks} ${l('Crimson', 'carmesí')} + ${slot.overview.ceruleanFlasks} ${l('Cerulean', 'cerúleo')}**. ${l('Talisman slots', 'Ranuras de talismán')}: **${slot.overview.talismanSlots}**.\n\n` +
+    `## ${l('Attributes and build', 'Atributos y build')}\n\n` +
+    `${l('Attributes', 'Atributos')}: ${attributes}.\n\n` +
+    `${l('Interpretation', 'Interpretación')}: **${slot.build.archetype}**. ${slot.build.summary}\n\n` +
+    `${advice || l('- No automatic observations.', '- Sin observaciones automáticas.')}\n\n` +
+    `## ${l('Equipment', 'Equipo')}\n\n` +
+    `- ${l('Weapons', 'Armas')}: ${listNames(mainWeapons, language)}\n` +
+    `- ${l('Talismans', 'Talismanes')}: ${listNames(activeTalismans, language)}\n` +
+    `- ${l('Spells', 'Hechizos')}: ${listNames(activeSpells, language)}\n` +
+    `- ${l('Physick tears', 'Lágrimas del Físico')}: ${listNames(physickTears, language)}\n\n` +
+    `## ${l('Inventory', 'Inventario')}\n\n` +
+    `${l(
+      `Resolved **${slot.inventory.length} entries**; ${slot.inventory.filter((item) => item.keyItem).length} are key items and ${slot.inventory.filter((item) => item.storage === 'chest').length} are in the chest.`,
+      `Se han resuelto **${slot.inventory.length} entradas**; ${slot.inventory.filter((item) => item.keyItem).length} son objetos clave y ${slot.inventory.filter((item) => item.storage === 'chest').length} están en el baúl.`,
+    )}\n\n` +
+    `${slot.inventory.map((item) => `- ${exportLabel(item.name, includeIds, unresolvedItemLabel(item.type, language))}${item.upgradeLevel ? ` +${item.upgradeLevel}` : ''} ×${item.quantity} — ${item.storage === 'held' ? l('inventory', 'inventario') : l('chest', 'baúl')}${item.keyItem ? l(', key item', ', clave') : ''}${item.equipped ? l(', equipped', ', equipado') : ''}`).join('\n')}\n\n` +
+    `## ${l('Detected progress', 'Progreso ya detectado')}\n\n` +
+    `- ${l('Defeated bosses/milestones', 'Jefes/hitos derrotados')}: ${listNames(slot.progress.defeatedBosses, language, 100)}\n` +
+    `- ${l('Discovered Sites of Grace', 'Lugares de gracia descubiertos')}: ${listNames(slot.progress.discoveredGraces, language, 100)}\n` +
+    `- ${l('Cookbooks', 'Libros de recetas')}: ${listNames(slot.progress.acquiredCookbooks, language, 100)}\n` +
+    `- ${l('Bell bearings', 'Rodamientos de campana')}: ${listNames(slot.progress.acquiredBellBearings, language, 100)}\n` +
+    `- ${l('Whetblades', 'Hojas de afilar')}: ${listNames(slot.progress.acquiredWhetblades, language, 100)}\n` +
     pendingProgress;
 }
 

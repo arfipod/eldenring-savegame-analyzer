@@ -48,6 +48,10 @@ code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospac
 .app-header__brand h1 { margin: 2px 0 0; font-family: Georgia, "Times New Roman", serif; font-weight: 500; font-size: clamp(1.12rem, 2vw, 1.58rem); letter-spacing: .015em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .brand-mark { width: 48px; height: 48px; border: 1px solid var(--line-strong); border-radius: 50%; display: grid; place-items: center; color: var(--gold-bright); background: radial-gradient(circle, rgba(216,189,114,.16), rgba(216,189,114,.03) 60%); box-shadow: inset 0 0 24px rgba(216,189,114,.06); flex: none; }
 .app-header__badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.language-switch { display: inline-flex; align-items: center; padding: 2px; border: 1px solid rgba(255,255,255,.1); border-radius: 999px; background: rgba(255,255,255,.025); }
+.language-switch button { min-width: 32px; min-height: 24px; padding: 3px 7px; border: 0; border-radius: 999px; color: var(--muted); background: transparent; cursor: pointer; font-size: .68rem; font-weight: 800; }
+.language-switch button:hover { color: var(--text); }
+.language-switch button.language-switch__active { color: #15130c; background: var(--gold-bright); }
 .eyebrow { display: block; text-transform: uppercase; letter-spacing: .18em; font-size: .67rem; font-weight: 800; color: var(--gold); }
 
 .status-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 5px 9px; border: 1px solid rgba(255,255,255,.09); border-radius: 999px; color: var(--muted); background: rgba(255,255,255,.025); font-size: .72rem; font-weight: 750; line-height: 1.1; white-space: nowrap; }
@@ -331,7 +335,8 @@ button:disabled { cursor: wait; opacity: .72; }
   .app-header { min-height: 80px; }
   .brand-mark { width: 42px; height: 42px; }
   .app-header__brand h1 { font-size: 1rem; }
-  .app-header__badges { display: none; }
+  .app-header__badges { display: flex; max-width: none; }
+  .app-header__badges .status-pill { display: none; }
   .landing { padding: 46px 0 55px; gap: 28px; }
   .landing__intro h2 { font-size: clamp(2.25rem, 12vw, 3.6rem); }
   .landing__trust { display: grid; justify-content: start; text-align: left; }

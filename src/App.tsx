@@ -39,7 +39,7 @@ import {
   Zap,
   type LucideIcon,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, CSSProperties, Dispatch, DragEvent, ReactNode, SetStateAction } from 'react';
 import { getFallbackCatalog, loadSemanticCatalog } from './lib/catalog';
 import { runeCostForNextLevel, runesBetweenLevels } from './lib/build-advisor';
@@ -61,6 +61,8 @@ import {
   formatOffset,
   formatRate,
 } from './lib/format';
+import type { AppLanguage } from './lib/i18n';
+import { DEFAULT_LANGUAGE, isAppLanguage, localize } from './lib/i18n';
 import { createSemanticSlots, missingProgressEntries } from './lib/semantic';
 import type {
   AttributeKey,
@@ -75,70 +77,127 @@ import type {
   WorkerParseResponse,
 } from './types';
 
-const ATTRIBUTE_LABELS: Record<AttributeKey, string> = {
-  vigor: 'Vigor',
-  mind: 'Mente',
-  endurance: 'Aguante',
-  strength: 'Fuerza',
-  dexterity: 'Destreza',
-  intelligence: 'Inteligencia',
-  faith: 'Fe',
-  arcane: 'Arcano',
+const ATTRIBUTE_LABELS: Record<AppLanguage, Record<AttributeKey, string>> = {
+  en: {
+    vigor: 'Vigor',
+    mind: 'Mind',
+    endurance: 'Endurance',
+    strength: 'Strength',
+    dexterity: 'Dexterity',
+    intelligence: 'Intelligence',
+    faith: 'Faith',
+    arcane: 'Arcane',
+  },
+  es: {
+    vigor: 'Vigor',
+    mind: 'Mente',
+    endurance: 'Aguante',
+    strength: 'Fuerza',
+    dexterity: 'Destreza',
+    intelligence: 'Inteligencia',
+    faith: 'Fe',
+    arcane: 'Arcano',
+  },
 };
 
-const TYPE_LABELS: Record<ResolvedInventoryItem['type'] | 'all', string> = {
-  all: 'Todos los tipos',
-  weapon: 'Armas y catalizadores',
-  armor: 'Armadura',
-  talisman: 'Talismán',
-  good: 'Objetos, magia y cenizas',
-  ashOfWar: 'Cenizas de guerra',
-  unknown: 'Sin resolver',
+const TYPE_LABELS: Record<AppLanguage, Record<ResolvedInventoryItem['type'] | 'all', string>> = {
+  en: {
+    all: 'All types',
+    weapon: 'Weapons and catalysts',
+    armor: 'Armor',
+    talisman: 'Talismans',
+    good: 'Items, spells, and ashes',
+    ashOfWar: 'Ashes of War',
+    unknown: 'Unresolved',
+  },
+  es: {
+    all: 'Todos los tipos',
+    weapon: 'Armas y catalizadores',
+    armor: 'Armadura',
+    talisman: 'Talismán',
+    good: 'Objetos, magia y cenizas',
+    ashOfWar: 'Cenizas de guerra',
+    unknown: 'Sin resolver',
+  },
 };
 
-const SPOILER_OPTIONS: Array<{
+type SpoilerOption = {
   value: SpoilerMode;
   label: string;
   description: string;
   icon: LucideIcon;
-}> = [
+};
+
+function spoilerOptions(language: AppLanguage): SpoilerOption[] {
+  const l = (english: string, spanish: string) => localize(language, english, spanish);
+  return [
   {
     value: 'safe',
-    label: 'Sin spoilers',
-    description: 'Solo muestra lo que el save acredita como obtenido, descubierto o derrotado.',
+    label: l('Spoiler-safe', 'Sin spoilers'),
+    description: l(
+      'Shows only what the save confirms as obtained, discovered, or defeated.',
+      'Solo muestra lo que el save acredita como obtenido, descubierto o derrotado.',
+    ),
     icon: ShieldCheck,
   },
   {
     value: 'zones',
-    label: 'Solo zonas',
-    description: 'Mantiene ocultos objetivos futuros; prioriza nombres de áreas ya registradas.',
+    label: l('Zones only', 'Solo zonas'),
+    description: l(
+      'Keeps future objectives hidden and prioritizes names of already recorded areas.',
+      'Mantiene ocultos objetivos futuros; prioriza nombres de áreas ya registradas.',
+    ),
     icon: MapPin,
   },
   {
     value: 'precise',
-    label: 'Preciso sin nombres',
-    description: 'Añade recuentos pendientes, pero no revela qué contenido falta.',
+    label: l('Precise, no names', 'Preciso sin nombres'),
+    description: l(
+      'Adds pending counts without revealing which content is missing.',
+      'Añade recuentos pendientes, pero no revela qué contenido falta.',
+    ),
     icon: EyeOff,
   },
   {
     value: 'completion',
-    label: 'Completista',
-    description: 'Expone nombres de contenido no detectado. Puede revelar mucho del juego.',
+    label: l('Completionist', 'Completista'),
+    description: l(
+      'Shows names of undetected content and may reveal much of the game.',
+      'Expone nombres de contenido no detectado. Puede revelar mucho del juego.',
+    ),
     icon: Eye,
   },
-];
+  ];
+}
 
 type TabId = 'summary' | 'build' | 'equipment' | 'inventory' | 'progress' | 'export' | 'raw';
 
-const TABS: Array<{ id: TabId; label: string; icon: LucideIcon }> = [
-  { id: 'summary', label: 'Resumen', icon: BarChart3 },
+function tabs(language: AppLanguage): Array<{ id: TabId; label: string; icon: LucideIcon }> {
+  const l = (english: string, spanish: string) => localize(language, english, spanish);
+  return [
+  { id: 'summary', label: l('Summary', 'Resumen'), icon: BarChart3 },
   { id: 'build', label: 'Build', icon: Brain },
-  { id: 'equipment', label: 'Equipo', icon: Swords },
-  { id: 'inventory', label: 'Inventario', icon: PackageSearch },
-  { id: 'progress', label: 'Progreso', icon: MapPin },
-  { id: 'export', label: 'IA y exportación', icon: Bot },
-  { id: 'raw', label: 'Datos técnicos', icon: TableProperties },
-];
+  { id: 'equipment', label: l('Equipment', 'Equipo'), icon: Swords },
+  { id: 'inventory', label: l('Inventory', 'Inventario'), icon: PackageSearch },
+  { id: 'progress', label: l('Progress', 'Progreso'), icon: MapPin },
+  { id: 'export', label: l('AI and export', 'IA y exportación'), icon: Bot },
+  { id: 'raw', label: l('Technical data', 'Datos técnicos'), icon: TableProperties },
+  ];
+}
+
+interface LanguageContextValue {
+  language: AppLanguage;
+  l: (english: string, spanish: string) => string;
+}
+
+const LanguageContext = createContext<LanguageContextValue>({
+  language: DEFAULT_LANGUAGE,
+  l: (english) => english,
+});
+
+function useLanguage(): LanguageContextValue {
+  return useContext(LanguageContext);
+}
 
 interface ToastState {
   kind: 'success' | 'error';
@@ -154,7 +213,7 @@ function isAcceptedFile(file: File): boolean {
   return lower.endsWith('.sl2') || lower.endsWith('.co2');
 }
 
-function copyText(text: string): Promise<void> {
+function copyText(text: string, language: AppLanguage): Promise<void> {
   if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
   const textarea = document.createElement('textarea');
   textarea.value = text;
@@ -164,7 +223,9 @@ function copyText(text: string): Promise<void> {
   textarea.select();
   const copied = document.execCommand('copy');
   textarea.remove();
-  return copied ? Promise.resolve() : Promise.reject(new Error('No se pudo copiar al portapapeles.'));
+  return copied
+    ? Promise.resolve()
+    : Promise.reject(new Error(localize(language, 'Could not copy to the clipboard.', 'No se pudo copiar al portapapeles.')));
 }
 
 function Panel({
@@ -250,17 +311,18 @@ function MetricCard({
 }
 
 function EquipmentLine({ item, label }: { item: ResolvedEquipmentItem; label?: string }) {
-  const empty = item.handle === 0 || item.name === 'Vacío';
+  const { language, l } = useLanguage();
+  const empty = item.handle === 0 || item.name === 'Vacío' || item.name === 'Empty';
   return (
     <div className={joinClass('equipment-line', empty && 'equipment-line--empty')}>
       <div>
         {label && <span className="equipment-line__label">{label}</span>}
         <strong>{item.name}{item.upgradeLevel > 0 ? ` +${item.upgradeLevel}` : ''}</strong>
         {item.ashOfWar && item.ashOfWar.name !== 'None' && (
-          <small>Ceniza: {item.ashOfWar.name}</small>
+          <small>{l('Ash', 'Ceniza')}: {item.ashOfWar.name}</small>
         )}
       </div>
-      <StatusPill tone={empty ? 'neutral' : 'gold'}>{empty ? 'Vacío' : item.type}</StatusPill>
+      <StatusPill tone={empty ? 'neutral' : 'gold'}>{empty ? l('Empty', 'Vacío') : TYPE_LABELS[language][item.type]}</StatusPill>
     </div>
   );
 }
@@ -276,13 +338,14 @@ function ProgressList({
   emptyText: string;
   limit?: number;
 }) {
+  const { language, l } = useLanguage();
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? items : items.slice(0, limit);
   return (
     <Panel className="progress-list">
       <div className="progress-list__header">
         <h3>{title}</h3>
-        <StatusPill tone="gold">{formatNumber(items.length)}</StatusPill>
+        <StatusPill tone="gold">{formatNumber(items.length, language)}</StatusPill>
       </div>
       {items.length === 0 ? (
         <p className="empty-copy">{emptyText}</p>
@@ -295,7 +358,12 @@ function ProgressList({
       )}
       {items.length > limit && (
         <button className="text-button" type="button" onClick={() => setExpanded((value) => !value)}>
-          {expanded ? 'Mostrar menos' : `Mostrar ${formatNumber(items.length - limit)} más`}
+          {expanded
+            ? l('Show less', 'Mostrar menos')
+            : l(
+                `Show ${formatNumber(items.length - limit, language)} more`,
+                `Mostrar ${formatNumber(items.length - limit, language)} más`,
+              )}
           <ChevronDown aria-hidden="true" size={16} className={expanded ? 'rotate-180' : undefined} />
         </button>
       )}
@@ -328,7 +396,18 @@ function Toggle({
   );
 }
 
-function AppHeader({ catalog, catalogStatus }: { catalog: SemanticCatalog; catalogStatus: string }) {
+function AppHeader({
+  catalog,
+  catalogStatus,
+  language,
+  onLanguage,
+}: {
+  catalog: SemanticCatalog;
+  catalogStatus: string;
+  language: AppLanguage;
+  onLanguage: (language: AppLanguage) => void;
+}) {
+  const { l } = useLanguage();
   const catalogReady = catalog.loadedSources.length > 1;
   return (
     <header className="app-header">
@@ -340,10 +419,16 @@ function AppHeader({ catalog, catalogStatus }: { catalog: SemanticCatalog; catal
         </div>
       </div>
       <div className="app-header__badges">
-        <StatusPill icon={LockKeyhole} tone="good">Procesado local</StatusPill>
-        <StatusPill icon={ShieldCheck} tone="good">Solo lectura</StatusPill>
+        <div className="language-switch" role="group" aria-label={l('Language', 'Idioma')}>
+          <button type="button" className={language === 'en' ? 'language-switch__active' : undefined} onClick={() => onLanguage('en')} aria-pressed={language === 'en'}>EN</button>
+          <button type="button" className={language === 'es' ? 'language-switch__active' : undefined} onClick={() => onLanguage('es')} aria-pressed={language === 'es'}>ES</button>
+        </div>
+        <StatusPill icon={LockKeyhole} tone="good">{l('Local processing', 'Procesado local')}</StatusPill>
+        <StatusPill icon={ShieldCheck} tone="good">{l('Read only', 'Solo lectura')}</StatusPill>
         <StatusPill icon={catalogReady ? CheckCircle2 : RefreshCw} tone={catalogReady ? 'gold' : 'neutral'}>
-          {catalogReady ? `${catalog.loadedSources.length} fuentes semánticas` : catalogStatus}
+          {catalogReady
+            ? l(`${catalog.loadedSources.length} semantic sources`, `${catalog.loadedSources.length} fuentes semánticas`)
+            : catalogStatus}
         </StatusPill>
       </div>
     </header>
@@ -367,6 +452,7 @@ function UploadScreen({
   onFile: (file: File) => void;
   onDragState: (value: boolean) => void;
 }) {
+  const { l } = useLanguage();
   const inputRef = useRef<HTMLInputElement>(null);
   const choose = () => inputRef.current?.click();
   const handleDrop = (event: DragEvent) => {
@@ -379,16 +465,18 @@ function UploadScreen({
   return (
     <main className="landing">
       <section className="landing__intro">
-        <span className="eyebrow">Tu partida, explicada sin tocarla</span>
-        <h2>Convierte un <span>.sl2</span> en un informe útil, privado y entendible.</h2>
+        <span className="eyebrow">{l('Your save, explained without touching it', 'Tu partida, explicada sin tocarla')}</span>
+        <h2>{l('Turn an ', 'Convierte un ')}<span>.sl2</span>{l(' into a useful, private, understandable report.', ' en un informe útil, privado y entendible.')}</h2>
         <p>
-          Decodifica ranuras, nivel, muertes, atributos, build, equipo, inventario, progreso,
-          frascos, Físico Maravilloso y campos técnicos. Después expórtalo como JSON listo para una IA.
+          {l(
+            'Decode slots, level, deaths, attributes, build, equipment, inventory, progress, flasks, Flask of Wondrous Physick, and technical fields. Then export it as AI-ready JSON.',
+            'Decodifica ranuras, nivel, muertes, atributos, build, equipo, inventario, progreso, frascos, Físico Maravilloso y campos técnicos. Después expórtalo como JSON listo para una IA.',
+          )}
         </p>
         <div className="landing__trust">
-          <span><ShieldCheck size={17} /> El archivo no sale del navegador</span>
-          <span><HardDrive size={17} /> No se guarda ni se reescribe</span>
-          <span><EyeOff size={17} /> Modo sin spoilers por defecto</span>
+          <span><ShieldCheck size={17} /> {l('The file never leaves your browser', 'El archivo no sale del navegador')}</span>
+          <span><HardDrive size={17} /> {l('It is never saved or rewritten', 'No se guarda ni se reescribe')}</span>
+          <span><EyeOff size={17} /> {l('Spoiler-safe by default', 'Modo sin spoilers por defecto')}</span>
         </div>
       </section>
 
@@ -419,10 +507,10 @@ function UploadScreen({
           <span className="drop-zone__icon">
             {busy ? <RefreshCw className="spin" size={34} /> : <UploadCloud size={38} />}
           </span>
-          <strong>{busy ? stage : 'Arrastra ER0000.sl2 aquí'}</strong>
-          <span>{busy ? `${Math.round(progress * 100)} %` : 'o pulsa para elegir el archivo de tu Steam Deck o PC'}</span>
+          <strong>{busy ? stage : l('Drop ER0000.sl2 here', 'Arrastra ER0000.sl2 aquí')}</strong>
+          <span>{busy ? `${Math.round(progress * 100)} %` : l('or click to choose the file from your Steam Deck or PC', 'o pulsa para elegir el archivo de tu Steam Deck o PC')}</span>
           {busy && (
-            <span className="progress-track" aria-label={`Progreso ${Math.round(progress * 100)} %`}>
+            <span className="progress-track" aria-label={l(`Progress ${Math.round(progress * 100)}%`, `Progreso ${Math.round(progress * 100)} %`)}>
               <span style={{ width: `${Math.max(3, progress * 100)}%` }} />
             </span>
           )}
@@ -430,29 +518,30 @@ function UploadScreen({
         {error && (
           <div className="inline-alert inline-alert--danger" role="alert">
             <AlertTriangle aria-hidden="true" size={19} />
-            <div><strong>No se pudo analizar el archivo</strong><p>{error}</p></div>
+            <div><strong>{l('The file could not be analyzed', 'No se pudo analizar el archivo')}</strong><p>{error}</p></div>
           </div>
         )}
         <div className="upload-panel__notes">
-          <span><FileSearch size={16} /> Compatible con partidas PC BND4 <code>.sl2</code> y <code>.co2</code>.</span>
-          <span><Info size={16} /> “Decodificar” no significa que el save esté cifrado: se interpreta su formato binario.</span>
+          <span><FileSearch size={16} /> {l('Compatible with BND4 PC saves', 'Compatible con partidas PC BND4')} <code>.sl2</code> {l('and', 'y')} <code>.co2</code>.</span>
+          <span><Info size={16} /> {l('“Decode” does not mean the save is encrypted: the app interprets its binary format.', '“Decodificar” no significa que el save esté cifrado: se interpreta su formato binario.')}</span>
         </div>
       </Panel>
 
-      <section className="feature-grid" aria-label="Funciones">
-        <article><UserRound size={22} /><strong>Perfil y build</strong><p>Nivel, atributos, clase inicial, enfoque y recomendaciones respaldadas por datos.</p></article>
-        <article><PackageSearch size={22} /><strong>Objetos con nombre</strong><p>Inventario, baúl, equipo, mejoras, hechizos, talismanes y cenizas.</p></article>
-        <article><MapPin size={22} /><strong>Progreso controlado</strong><p>Hitos y lugares ya registrados, con cuatro niveles explícitos de spoilers.</p></article>
-        <article><FileJson size={22} /><strong>Exportación para IA</strong><p>JSON semántico, informe Markdown y volcado forense con privacidad configurable.</p></article>
+      <section className="feature-grid" aria-label={l('Features', 'Funciones')}>
+        <article><UserRound size={22} /><strong>{l('Profile and build', 'Perfil y build')}</strong><p>{l('Level, attributes, starting class, focus, and data-backed recommendations.', 'Nivel, atributos, clase inicial, enfoque y recomendaciones respaldadas por datos.')}</p></article>
+        <article><PackageSearch size={22} /><strong>{l('Named items', 'Objetos con nombre')}</strong><p>{l('Inventory, chest, equipment, upgrades, spells, talismans, and ashes.', 'Inventario, baúl, equipo, mejoras, hechizos, talismanes y cenizas.')}</p></article>
+        <article><MapPin size={22} /><strong>{l('Controlled progress', 'Progreso controlado')}</strong><p>{l('Recorded milestones and places, with four explicit spoiler levels.', 'Hitos y lugares ya registrados, con cuatro niveles explícitos de spoilers.')}</p></article>
+        <article><FileJson size={22} /><strong>{l('AI export', 'Exportación para IA')}</strong><p>{l('Semantic JSON, Markdown report, and forensic dump with configurable privacy.', 'JSON semántico, informe Markdown y volcado forense con privacidad configurable.')}</p></article>
       </section>
     </main>
   );
 }
 
 function SpoilerSelector({ value, onChange }: { value: SpoilerMode; onChange: (value: SpoilerMode) => void }) {
+  const { language, l } = useLanguage();
   return (
-    <div className="spoiler-selector" role="radiogroup" aria-label="Nivel de spoilers">
-      {SPOILER_OPTIONS.map((option) => {
+    <div className="spoiler-selector" role="radiogroup" aria-label={l('Spoiler level', 'Nivel de spoilers')}>
+      {spoilerOptions(language).map((option) => {
         const Icon = option.icon;
         return (
           <button
@@ -473,41 +562,48 @@ function SpoilerSelector({ value, onChange }: { value: SpoilerMode; onChange: (v
 }
 
 function SummaryTab({ slot }: { slot: SemanticSlot }) {
+  const { language, l } = useLanguage();
   const mainWeapons = [...slot.equipment.rightHand, ...slot.equipment.leftHand]
-    .filter((item) => item.handle !== 0 && item.name !== 'Mano desnuda');
+    .filter((item) => item.handle !== 0 && item.name !== 'Mano desnuda' && item.name !== 'Bare hands');
   const topAdvice = slot.build.advice.slice(0, 4);
   const maxAttribute = Math.max(60, ...(Object.values(slot.attributes) as number[]));
 
   return (
     <div className="tab-stack">
       <section className="metrics-grid">
-        <MetricCard icon={Clock3} label="Tiempo de juego" value={formatDuration(slot.identity.playtimeSeconds)} detail={formatClock(slot.identity.playtimeSeconds)} tone="gold" />
-        <MetricCard icon={Skull} label="Muertes" value={formatNumber(slot.overview.deaths)} detail={formatRate(slot.overview.deaths, slot.identity.playtimeSeconds)} tone="warning" />
-        <MetricCard icon={Sparkles} label="Runas actuales" value={formatNumber(slot.overview.currentRunes)} detail={`${formatNumber(slot.overview.lifetimeRunes)} acumuladas`} />
-        <MetricCard icon={MapPin} label="Última gracia" value={slot.overview.lastRestedGrace} detail={slot.overview.mapLabel} />
-        <MetricCard icon={FlaskConical} label="Frascos" value={`${slot.overview.crimsonFlasks} + ${slot.overview.ceruleanFlasks}`} detail={`${slot.overview.totalFlasks} cargas detectadas`} tone="good" />
-        <MetricCard icon={Layers3} label="Ranuras de talismán" value={String(slot.overview.talismanSlots)} detail={`${slot.equipment.talismans.filter((item) => item.handle !== 0).length} ocupadas`} />
-        <MetricCard icon={HeartPulse} label="PV máximos" value={formatNumber(slot.vitals.hp.max)} detail={`${formatNumber(slot.vitals.stamina.max)} de aguante`} />
-        <MetricCard icon={Swords} label="Arma principal" value={mainWeapons[0]?.name ?? 'No resuelta'} detail={mainWeapons[0]?.upgradeLevel ? `Mejora +${mainWeapons[0].upgradeLevel}` : 'Revisa la pestaña Equipo'} tone="gold" />
+        <MetricCard icon={Clock3} label={l('Play time', 'Tiempo de juego')} value={formatDuration(slot.identity.playtimeSeconds)} detail={formatClock(slot.identity.playtimeSeconds)} tone="gold" />
+        <MetricCard icon={Skull} label={l('Deaths', 'Muertes')} value={formatNumber(slot.overview.deaths, language)} detail={formatRate(slot.overview.deaths, slot.identity.playtimeSeconds, language)} tone="warning" />
+        <MetricCard icon={Sparkles} label={l('Current runes', 'Runas actuales')} value={formatNumber(slot.overview.currentRunes, language)} detail={l(`${formatNumber(slot.overview.lifetimeRunes, language)} lifetime`, `${formatNumber(slot.overview.lifetimeRunes, language)} acumuladas`)} />
+        <MetricCard icon={MapPin} label={l('Last Site of Grace', 'Última gracia')} value={slot.overview.lastRestedGrace} detail={slot.overview.mapLabel} />
+        <MetricCard icon={FlaskConical} label={l('Flasks', 'Frascos')} value={`${slot.overview.crimsonFlasks} + ${slot.overview.ceruleanFlasks}`} detail={l(`${slot.overview.totalFlasks} charges detected`, `${slot.overview.totalFlasks} cargas detectadas`)} tone="good" />
+        <MetricCard icon={Layers3} label={l('Talisman slots', 'Ranuras de talismán')} value={String(slot.overview.talismanSlots)} detail={l(`${slot.equipment.talismans.filter((item) => item.handle !== 0).length} occupied`, `${slot.equipment.talismans.filter((item) => item.handle !== 0).length} ocupadas`)} />
+        <MetricCard icon={HeartPulse} label={l('Max HP', 'PV máximos')} value={formatNumber(slot.vitals.hp.max, language)} detail={l(`${formatNumber(slot.vitals.stamina.max, language)} stamina`, `${formatNumber(slot.vitals.stamina.max, language)} de aguante`)} />
+        <MetricCard icon={Swords} label={l('Main weapon', 'Arma principal')} value={mainWeapons[0]?.name ?? l('Unresolved', 'No resuelta')} detail={mainWeapons[0]?.upgradeLevel ? l(`Upgrade +${mainWeapons[0].upgradeLevel}`, `Mejora +${mainWeapons[0].upgradeLevel}`) : l('See the Equipment tab', 'Revisa la pestaña Equipo')} tone="gold" />
       </section>
 
       {slot.overview.bloodstainRunes > 0 && (
         <div className="inline-alert inline-alert--warning">
           <AlertTriangle aria-hidden="true" size={20} />
           <div>
-            <strong>Hay {formatNumber(slot.overview.bloodstainRunes)} runas en una mancha de sangre</strong>
-            <p>Es un hecho leído del save. El analizador no conoce si ya estás camino de recuperarlas.</p>
+            <strong>{l(
+              `There are ${formatNumber(slot.overview.bloodstainRunes, language)} runes in a bloodstain`,
+              `Hay ${formatNumber(slot.overview.bloodstainRunes, language)} runas en una mancha de sangre`,
+            )}</strong>
+            <p>{l(
+              'This is a fact read from the save. The analyzer does not know whether you are already on your way to recover them.',
+              'Es un hecho leído del save. El analizador no conoce si ya estás camino de recuperarlas.',
+            )}</p>
           </div>
         </div>
       )}
 
       <div className="two-column">
         <Panel>
-          <SectionHeading icon={Gauge} eyebrow="Distribución" title="Atributos" description={`Nivel ${slot.identity.level} · ${slot.identity.className}`} />
+          <SectionHeading icon={Gauge} eyebrow={l('Distribution', 'Distribución')} title={l('Attributes', 'Atributos')} description={l(`Level ${slot.identity.level} · ${slot.identity.className}`, `Nivel ${slot.identity.level} · ${slot.identity.className}`)} />
           <div className="attribute-bars">
             {(Object.entries(slot.attributes) as Array<[AttributeKey, number]>).map(([key, value]) => (
               <div className={joinClass('attribute-bar', slot.build.primaryStats.includes(key) && 'attribute-bar--primary')} key={key}>
-                <div><span>{ATTRIBUTE_LABELS[key]}</span><strong>{value}</strong></div>
+                <div><span>{ATTRIBUTE_LABELS[language][key]}</span><strong>{value}</strong></div>
                 <span className="attribute-bar__track"><span style={{ width: `${Math.min(100, (value / maxAttribute) * 100)}%` }} /></span>
               </div>
             ))}
@@ -515,12 +611,15 @@ function SummaryTab({ slot }: { slot: SemanticSlot }) {
         </Panel>
 
         <Panel>
-          <SectionHeading icon={Brain} eyebrow="Lectura automática" title={slot.build.archetype} description={slot.build.summary} />
+          <SectionHeading icon={Brain} eyebrow={l('Automatic analysis', 'Lectura automática')} title={slot.build.archetype} description={slot.build.summary} />
           <div className="focus-score">
             <div className="focus-score__dial" style={{ '--score': `${slot.build.levelEfficiency * 3.6}deg` } as CSSProperties}>
               <strong>{slot.build.levelEfficiency}</strong><span>/100</span>
             </div>
-            <div><strong>Concentración de puntos ofensivos</strong><p>No es una nota de “buena o mala” build: mide cuánto se concentra la inversión frente a dispersarse.</p></div>
+            <div><strong>{l('Offensive point concentration', 'Concentración de puntos ofensivos')}</strong><p>{l(
+              'This is not a “good or bad” build score; it measures how concentrated the investment is instead of how spread out it is.',
+              'No es una nota de “buena o mala” build: mide cuánto se concentra la inversión frente a dispersarse.',
+            )}</p></div>
           </div>
           <div className="advice-mini-list">
             {topAdvice.map((item) => (
@@ -534,12 +633,12 @@ function SummaryTab({ slot }: { slot: SemanticSlot }) {
       </div>
 
       <Panel>
-        <SectionHeading icon={Database} eyebrow="Transparencia" title="Qué se ha podido leer" description="El parser distingue datos interpretados de blobs internos sin significado público fiable." />
+        <SectionHeading icon={Database} eyebrow={l('Transparency', 'Transparencia')} title={l('What could be read', 'Qué se ha podido leer')} description={l('The parser separates interpreted data from internal blobs without reliable public meaning.', 'El parser distingue datos interpretados de blobs internos sin significado público fiable.')} />
         <div className="coverage-grid">
-          <div><strong>{formatNumber(slot.inventory.length)}</strong><span>entradas de inventario resueltas</span></div>
-          <div><strong>{formatNumber(slot.raw.gaItems.length)}</strong><span>registros GAItem activos</span></div>
-          <div><strong>{formatNumber(slot.raw.unlockedRegionIds.length)}</strong><span>regiones internas desbloqueadas</span></div>
-          <div><strong>{formatNumber(slot.raw.opaqueSections.length)}</strong><span>secciones opacas indexadas</span></div>
+          <div><strong>{formatNumber(slot.inventory.length, language)}</strong><span>{l('resolved inventory entries', 'entradas de inventario resueltas')}</span></div>
+          <div><strong>{formatNumber(slot.raw.gaItems.length, language)}</strong><span>{l('active GAItem records', 'registros GAItem activos')}</span></div>
+          <div><strong>{formatNumber(slot.raw.unlockedRegionIds.length, language)}</strong><span>{l('unlocked internal regions', 'regiones internas desbloqueadas')}</span></div>
+          <div><strong>{formatNumber(slot.raw.opaqueSections.length, language)}</strong><span>{l('indexed opaque sections', 'secciones opacas indexadas')}</span></div>
         </div>
       </Panel>
     </div>
@@ -547,18 +646,19 @@ function SummaryTab({ slot }: { slot: SemanticSlot }) {
 }
 
 function BuildTab({ slot }: { slot: SemanticSlot }) {
+  const { language, l } = useLanguage();
   const [targetLevel, setTargetLevel] = useState(slot.identity.level + 10);
   useEffect(() => setTargetLevel(slot.identity.level + 10), [slot.identity.level]);
   const needed = runesBetweenLevels(slot.identity.level, targetLevel);
   const next = runeCostForNextLevel(slot.identity.level);
   const activeWeapons = [...slot.equipment.rightHand, ...slot.equipment.leftHand]
-    .filter((item) => item.handle !== 0 && item.name !== 'Mano desnuda');
+    .filter((item) => item.handle !== 0 && item.name !== 'Mano desnuda' && item.name !== 'Bare hands');
 
   return (
     <div className="tab-stack">
       <div className="two-column two-column--wide-left">
         <Panel>
-          <SectionHeading icon={Brain} eyebrow="Diagnóstico" title={slot.build.archetype} description={slot.build.summary} />
+          <SectionHeading icon={Brain} eyebrow={l('Diagnosis', 'Diagnóstico')} title={slot.build.archetype} description={slot.build.summary} />
           <div className="advice-grid">
             {slot.build.advice.map((item) => (
               <article className={joinClass('advice-card', `advice-card--${item.severity}`)} key={item.id}>
@@ -575,9 +675,9 @@ function BuildTab({ slot }: { slot: SemanticSlot }) {
 
         <div className="side-stack">
           <Panel>
-            <SectionHeading icon={Sparkles} eyebrow="Planificador" title="Coste de niveles" description="Cálculo con la curva de runas del juego." />
+            <SectionHeading icon={Sparkles} eyebrow={l('Planner', 'Planificador')} title={l('Level cost', 'Coste de niveles')} description={l("Calculated with the game's rune curve.", 'Cálculo con la curva de runas del juego.')} />
             <label className="number-field">
-              <span>Nivel objetivo</span>
+              <span>{l('Target level', 'Nivel objetivo')}</span>
               <input
                 type="number"
                 min={slot.identity.level}
@@ -586,31 +686,34 @@ function BuildTab({ slot }: { slot: SemanticSlot }) {
                 onChange={(event: ChangeEvent<HTMLInputElement>) => setTargetLevel(Math.max(slot.identity.level, Math.min(713, Number(event.target.value) || slot.identity.level)))}
               />
             </label>
-            <div className="planner-result"><strong>{formatNumber(needed)}</strong><span>runas para llegar a nivel {targetLevel}</span></div>
-            <p className="muted-copy">Siguiente nivel: {formatNumber(next)} runas. Actualmente llevas {formatNumber(slot.overview.currentRunes)}.</p>
+            <div className="planner-result"><strong>{formatNumber(needed, language)}</strong><span>{l(`runes to reach level ${targetLevel}`, `runas para llegar a nivel ${targetLevel}`)}</span></div>
+            <p className="muted-copy">{l(
+              `Next level: ${formatNumber(next, language)} runes. You currently have ${formatNumber(slot.overview.currentRunes, language)}.`,
+              `Siguiente nivel: ${formatNumber(next, language)} runas. Actualmente llevas ${formatNumber(slot.overview.currentRunes, language)}.`,
+            )}</p>
           </Panel>
 
           <Panel>
-            <SectionHeading icon={Swords} eyebrow="Escalado práctico" title="Armas activas" />
+            <SectionHeading icon={Swords} eyebrow={l('Practical scaling', 'Escalado práctico')} title={l('Active weapons', 'Armas activas')} />
             <div className="equipment-stack">
-              {activeWeapons.length > 0 ? activeWeapons.map((item, index) => <EquipmentLine item={item} label={`Arma ${index + 1}`} key={`${item.handle}-${index}`} />) : <p className="empty-copy">No se ha resuelto ningún arma activa.</p>}
+              {activeWeapons.length > 0 ? activeWeapons.map((item, index) => <EquipmentLine item={item} label={l(`Weapon ${index + 1}`, `Arma ${index + 1}`)} key={`${item.handle}-${index}`} />) : <p className="empty-copy">{l('No active weapon was resolved.', 'No se ha resuelto ningún arma activa.')}</p>}
             </div>
           </Panel>
         </div>
       </div>
 
       <Panel>
-        <SectionHeading icon={Activity} eyebrow="Ficha" title="Atributos y recursos" description="Valores almacenados en PlayerGameData." />
+        <SectionHeading icon={Activity} eyebrow={l('Details', 'Ficha')} title={l('Attributes and resources', 'Atributos y recursos')} description={l('Values stored in PlayerGameData.', 'Valores almacenados en PlayerGameData.')} />
         <div className="stat-table">
           {(Object.entries(slot.attributes) as Array<[AttributeKey, number]>).map(([key, value]) => (
             <div key={key} className={slot.build.primaryStats.includes(key) ? 'stat-table__primary' : undefined}>
-              <span>{ATTRIBUTE_LABELS[key]}</span><strong>{value}</strong>
+              <span>{ATTRIBUTE_LABELS[language][key]}</span><strong>{value}</strong>
             </div>
           ))}
-          <div><span>PV</span><strong>{slot.vitals.hp.current}/{slot.vitals.hp.max}</strong></div>
-          <div><span>PC</span><strong>{slot.vitals.fp.current}/{slot.vitals.fp.max}</strong></div>
-          <div><span>Aguante actual</span><strong>{slot.vitals.stamina.current}/{slot.vitals.stamina.max}</strong></div>
-          <div><span>Nivel de arma para matchmaking</span><strong>{slot.raw.player.matchmakingWeaponLevel}</strong></div>
+          <div><span>{l('HP', 'PV')}</span><strong>{slot.vitals.hp.current}/{slot.vitals.hp.max}</strong></div>
+          <div><span>{l('FP', 'PC')}</span><strong>{slot.vitals.fp.current}/{slot.vitals.fp.max}</strong></div>
+          <div><span>{l('Current stamina', 'Aguante actual')}</span><strong>{slot.vitals.stamina.current}/{slot.vitals.stamina.max}</strong></div>
+          <div><span>{l('Matchmaking weapon level', 'Nivel de arma para matchmaking')}</span><strong>{slot.raw.player.matchmakingWeaponLevel}</strong></div>
         </div>
       </Panel>
     </div>
@@ -618,53 +721,54 @@ function BuildTab({ slot }: { slot: SemanticSlot }) {
 }
 
 function EquipmentTab({ slot }: { slot: SemanticSlot }) {
+  const { l } = useLanguage();
   return (
     <div className="tab-stack">
       <div className="equipment-layout">
         <Panel>
-          <SectionHeading icon={Swords} eyebrow="Armamento" title="Manos y ranuras" />
+          <SectionHeading icon={Swords} eyebrow={l('Armaments', 'Armamento')} title={l('Hands and slots', 'Manos y ranuras')} />
           <div className="equipment-columns">
-            <div><h3>Mano derecha</h3>{slot.equipment.rightHand.map((item, index) => <EquipmentLine item={item} label={`Ranura ${index + 1}`} key={`r-${index}`} />)}</div>
-            <div><h3>Mano izquierda</h3>{slot.equipment.leftHand.map((item, index) => <EquipmentLine item={item} label={`Ranura ${index + 1}`} key={`l-${index}`} />)}</div>
+            <div><h3>{l('Right hand', 'Mano derecha')}</h3>{slot.equipment.rightHand.map((item, index) => <EquipmentLine item={item} label={l(`Slot ${index + 1}`, `Ranura ${index + 1}`)} key={`r-${index}`} />)}</div>
+            <div><h3>{l('Left hand', 'Mano izquierda')}</h3>{slot.equipment.leftHand.map((item, index) => <EquipmentLine item={item} label={l(`Slot ${index + 1}`, `Ranura ${index + 1}`)} key={`l-${index}`} />)}</div>
           </div>
         </Panel>
 
         <Panel>
-          <SectionHeading icon={ShieldCheck} eyebrow="Protección" title="Armadura" />
+          <SectionHeading icon={ShieldCheck} eyebrow={l('Protection', 'Protección')} title={l('Armor', 'Armadura')} />
           <div className="equipment-stack">
-            <EquipmentLine item={slot.equipment.armor.head} label="Cabeza" />
-            <EquipmentLine item={slot.equipment.armor.chest} label="Torso" />
-            <EquipmentLine item={slot.equipment.armor.arms} label="Brazos" />
-            <EquipmentLine item={slot.equipment.armor.legs} label="Piernas" />
+            <EquipmentLine item={slot.equipment.armor.head} label={l('Head', 'Cabeza')} />
+            <EquipmentLine item={slot.equipment.armor.chest} label={l('Chest', 'Torso')} />
+            <EquipmentLine item={slot.equipment.armor.arms} label={l('Arms', 'Brazos')} />
+            <EquipmentLine item={slot.equipment.armor.legs} label={l('Legs', 'Piernas')} />
           </div>
         </Panel>
       </div>
 
       <div className="three-column">
         <Panel>
-          <SectionHeading icon={Layers3} eyebrow={`${slot.equipment.talismans.filter((item) => item.handle !== 0).length}/${slot.overview.talismanSlots} ocupadas`} title="Talismanes" />
-          <div className="equipment-stack">{slot.equipment.talismans.slice(0, slot.overview.talismanSlots).map((item, index) => <EquipmentLine item={item} label={`Ranura ${index + 1}`} key={`t-${index}`} />)}</div>
+          <SectionHeading icon={Layers3} eyebrow={l(`${slot.equipment.talismans.filter((item) => item.handle !== 0).length}/${slot.overview.talismanSlots} occupied`, `${slot.equipment.talismans.filter((item) => item.handle !== 0).length}/${slot.overview.talismanSlots} ocupadas`)} title={l('Talismans', 'Talismanes')} />
+          <div className="equipment-stack">{slot.equipment.talismans.slice(0, slot.overview.talismanSlots).map((item, index) => <EquipmentLine item={item} label={l(`Slot ${index + 1}`, `Ranura ${index + 1}`)} key={`t-${index}`} />)}</div>
         </Panel>
         <Panel>
-          <SectionHeading icon={FlaskConical} eyebrow="Mezcla actual" title="Físico Maravilloso" description="El frasco admite dos lágrimas; aquí se muestran los handles ya resueltos." />
-          <div className="equipment-stack">{slot.equipment.physickTears.map((item, index) => <EquipmentLine item={item} label={`Lágrima ${index + 1}`} key={`p-${index}`} />)}</div>
+          <SectionHeading icon={FlaskConical} eyebrow={l('Current mixture', 'Mezcla actual')} title={l('Flask of Wondrous Physick', 'Físico Maravilloso')} description={l('The flask holds two tears; resolved handles are shown here.', 'El frasco admite dos lágrimas; aquí se muestran los handles ya resueltos.')} />
+          <div className="equipment-stack">{slot.equipment.physickTears.map((item, index) => <EquipmentLine item={item} label={l(`Tear ${index + 1}`, `Lágrima ${index + 1}`)} key={`p-${index}`} />)}</div>
         </Panel>
         <Panel>
-          <SectionHeading icon={Zap} eyebrow="Memorizados" title="Hechizos" />
+          <SectionHeading icon={Zap} eyebrow={l('Memorized', 'Memorizados')} title={l('Spells', 'Hechizos')} />
           <div className="simple-list">
             {slot.equipment.spells.filter((spell) => spell.id !== 0 && spell.id !== 0xffff_ffff).map((spell) => <div key={spell.id}><strong>{spell.name}</strong><span>0x{spell.hexId}</span></div>)}
-            {slot.equipment.spells.every((spell) => spell.id === 0 || spell.id === 0xffff_ffff) && <p className="empty-copy">No hay hechizos equipados.</p>}
+            {slot.equipment.spells.every((spell) => spell.id === 0 || spell.id === 0xffff_ffff) && <p className="empty-copy">{l('No spells are equipped.', 'No hay hechizos equipados.')}</p>}
           </div>
         </Panel>
       </div>
 
       <div className="two-column">
         <Panel>
-          <SectionHeading icon={Archive} eyebrow="Acceso rápido" title="Objetos rápidos" />
+          <SectionHeading icon={Archive} eyebrow={l('Quick access', 'Acceso rápido')} title={l('Quick items', 'Objetos rápidos')} />
           <div className="quick-grid">{slot.equipment.quickSlots.map((item, index) => <EquipmentLine item={item} label={`${index + 1}`} key={`q-${index}`} />)}</div>
         </Panel>
         <Panel>
-          <SectionHeading icon={PackageSearch} eyebrow="Bolsa" title="Objetos de la bolsa" />
+          <SectionHeading icon={PackageSearch} eyebrow={l('Pouch', 'Bolsa')} title={l('Pouch items', 'Objetos de la bolsa')} />
           <div className="quick-grid">{slot.equipment.pouch.map((item, index) => <EquipmentLine item={item} label={`${index + 1}`} key={`po-${index}`} />)}</div>
         </Panel>
       </div>
@@ -673,14 +777,15 @@ function EquipmentTab({ slot }: { slot: SemanticSlot }) {
 }
 
 function InventoryTab({ slot }: { slot: SemanticSlot }) {
+  const { language, l } = useLanguage();
   const [query, setQuery] = useState('');
   const [type, setType] = useState<ResolvedInventoryItem['type'] | 'all'>('all');
   const [storage, setStorage] = useState<'all' | 'held' | 'chest'>('all');
   const [keyOnly, setKeyOnly] = useState(false);
   const [equippedOnly, setEquippedOnly] = useState(false);
-  const normalized = query.trim().toLocaleLowerCase('es');
+  const normalized = query.trim().toLocaleLowerCase(language);
   const filtered = useMemo(() => slot.inventory.filter((item) => {
-    if (normalized && !`${item.name} ${item.classification ?? ''} ${item.hexId}`.toLocaleLowerCase('es').includes(normalized)) return false;
+    if (normalized && !`${item.name} ${item.classification ?? ''} ${item.hexId}`.toLocaleLowerCase(language).includes(normalized)) return false;
     if (type !== 'all' && item.type !== type) return false;
     if (storage !== 'all' && item.storage !== storage) return false;
     if (keyOnly && !item.keyItem) return false;
@@ -697,41 +802,41 @@ function InventoryTab({ slot }: { slot: SemanticSlot }) {
       <Panel>
         <SectionHeading
           icon={PackageSearch}
-          eyebrow={`${formatNumber(filtered.length)} de ${formatNumber(slot.inventory.length)}`}
-          title="Inventario y baúl"
-          description="Los nombres proceden del catálogo semántico; cada fila conserva un nivel de confianza para no fingir certezas."
-          action={<button className="secondary-button" type="button" onClick={resetFilters}><RefreshCw size={16} /> Limpiar filtros</button>}
+          eyebrow={l(`${formatNumber(filtered.length, language)} of ${formatNumber(slot.inventory.length, language)}`, `${formatNumber(filtered.length, language)} de ${formatNumber(slot.inventory.length, language)}`)}
+          title={l('Inventory and chest', 'Inventario y baúl')}
+          description={l('Names come from the semantic catalog; each row retains a confidence level to avoid false certainty.', 'Los nombres proceden del catálogo semántico; cada fila conserva un nivel de confianza para no fingir certezas.')}
+          action={<button className="secondary-button" type="button" onClick={resetFilters}><RefreshCw size={16} /> {l('Clear filters', 'Limpiar filtros')}</button>}
         />
         <div className="filter-bar">
-          <label className="search-field"><Search size={18} /><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder="Buscar objeto, clase o ID…" /></label>
-          <label className="select-field"><span>Tipo</span><select value={type} onChange={(event: ChangeEvent<HTMLSelectElement>) => setType(event.target.value as typeof type)}>{Object.entries(TYPE_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-          <label className="select-field"><span>Ubicación</span><select value={storage} onChange={(event: ChangeEvent<HTMLSelectElement>) => setStorage(event.target.value as typeof storage)}><option value="all">Todo</option><option value="held">Inventario</option><option value="chest">Baúl</option></select></label>
-          <label className="check-chip"><input type="checkbox" checked={keyOnly} onChange={(event: ChangeEvent<HTMLInputElement>) => setKeyOnly(event.target.checked)} /><span>Solo clave</span></label>
-          <label className="check-chip"><input type="checkbox" checked={equippedOnly} onChange={(event: ChangeEvent<HTMLInputElement>) => setEquippedOnly(event.target.checked)} /><span>Solo equipado</span></label>
+          <label className="search-field"><Search size={18} /><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder={l('Search item, class, or ID…', 'Buscar objeto, clase o ID…')} /></label>
+          <label className="select-field"><span>{l('Type', 'Tipo')}</span><select value={type} onChange={(event: ChangeEvent<HTMLSelectElement>) => setType(event.target.value as typeof type)}>{Object.entries(TYPE_LABELS[language]).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+          <label className="select-field"><span>{l('Location', 'Ubicación')}</span><select value={storage} onChange={(event: ChangeEvent<HTMLSelectElement>) => setStorage(event.target.value as typeof storage)}><option value="all">{l('All', 'Todo')}</option><option value="held">{l('Inventory', 'Inventario')}</option><option value="chest">{l('Chest', 'Baúl')}</option></select></label>
+          <label className="check-chip"><input type="checkbox" checked={keyOnly} onChange={(event: ChangeEvent<HTMLInputElement>) => setKeyOnly(event.target.checked)} /><span>{l('Key items only', 'Solo clave')}</span></label>
+          <label className="check-chip"><input type="checkbox" checked={equippedOnly} onChange={(event: ChangeEvent<HTMLInputElement>) => setEquippedOnly(event.target.checked)} /><span>{l('Equipped only', 'Solo equipado')}</span></label>
         </div>
       </Panel>
 
       <Panel className="inventory-panel">
         {filtered.length === 0 ? (
-          <div className="empty-state"><PackageSearch size={34} /><strong>No hay coincidencias</strong><p>Prueba otros filtros o limpia la búsqueda.</p></div>
+          <div className="empty-state"><PackageSearch size={34} /><strong>{l('No matches', 'No hay coincidencias')}</strong><p>{l('Try different filters or clear the search.', 'Prueba otros filtros o limpia la búsqueda.')}</p></div>
         ) : (
-          <div className="inventory-table" role="table" aria-label="Inventario">
+          <div className="inventory-table" role="table" aria-label={l('Inventory', 'Inventario')}>
             <div className="inventory-row inventory-row--head" role="row">
-              <span>Objeto</span><span>Cantidad</span><span>Tipo</span><span>Ubicación</span><span>Estado</span>
+              <span>{l('Item', 'Objeto')}</span><span>{l('Quantity', 'Cantidad')}</span><span>{l('Type', 'Tipo')}</span><span>{l('Location', 'Ubicación')}</span><span>{l('Status', 'Estado')}</span>
             </div>
             {filtered.map((item) => (
               <div className="inventory-row" role="row" key={`${item.storage}-${item.inventoryIndex}-${item.handle}`}>
                 <div className="inventory-name">
                   <strong>{item.name}{item.upgradeLevel > 0 && !item.name.match(/\+\d+$/) ? ` +${item.upgradeLevel}` : ''}</strong>
-                  <small>{item.classification ?? `ID semántico 0x${item.hexId}`}</small>
+                  <small>{item.classification ?? l(`Semantic ID 0x${item.hexId}`, `ID semántico 0x${item.hexId}`)}</small>
                   {item.semanticSummary && <em>{item.semanticSummary}</em>}
                 </div>
-                <strong>×{formatNumber(item.quantity)}</strong>
-                <span>{TYPE_LABELS[item.type]}</span>
-                <span>{item.storage === 'held' ? 'Inventario' : 'Baúl'}{item.keyItem ? ' · clave' : ''}</span>
+                <strong>×{formatNumber(item.quantity, language)}</strong>
+                <span>{TYPE_LABELS[language][item.type]}</span>
+                <span>{item.storage === 'held' ? l('Inventory', 'Inventario') : l('Chest', 'Baúl')}{item.keyItem ? l(' · key', ' · clave') : ''}</span>
                 <div className="row-pills">
-                  {item.equipped && <StatusPill tone="gold">Equipado</StatusPill>}
-                  <StatusPill tone={item.confidence === 'high' ? 'good' : item.confidence === 'medium' ? 'warning' : 'danger'}>{item.confidence === 'high' ? 'Resuelto' : item.confidence === 'medium' ? 'Probable' : 'ID raw'}</StatusPill>
+                  {item.equipped && <StatusPill tone="gold">{l('Equipped', 'Equipado')}</StatusPill>}
+                  <StatusPill tone={item.confidence === 'high' ? 'good' : item.confidence === 'medium' ? 'warning' : 'danger'}>{item.confidence === 'high' ? l('Resolved', 'Resuelto') : item.confidence === 'medium' ? l('Probable', 'Probable') : l('Raw ID', 'ID raw')}</StatusPill>
                 </div>
               </div>
             ))}
@@ -753,6 +858,7 @@ function ProgressTab({
   spoilerMode: SpoilerMode;
   onSpoilerMode: (value: SpoilerMode) => void;
 }) {
+  const { language, l } = useLanguage();
   const missing = useMemo(() => {
     if (spoilerMode !== 'completion' && spoilerMode !== 'precise') return null;
     return {
@@ -768,44 +874,50 @@ function ProgressTab({
   return (
     <div className="tab-stack">
       <Panel>
-        <SectionHeading icon={EyeOff} eyebrow="Control explícito" title="Nivel de spoilers" description="El modo se aplica a esta vista y a la exportación para IA." />
+        <SectionHeading icon={EyeOff} eyebrow={l('Explicit control', 'Control explícito')} title={l('Spoiler level', 'Nivel de spoilers')} description={l('The mode applies to this view and the AI export.', 'El modo se aplica a esta vista y a la exportación para IA.')} />
         <SpoilerSelector value={spoilerMode} onChange={onSpoilerMode} />
       </Panel>
 
       <div className="inline-alert inline-alert--info">
         <Info aria-hidden="true" size={20} />
-        <div><strong>“Logros” significa hitos inferidos</strong><p>Las banderas del save permiten detectar muchos jefes, gracias y objetos de progreso, pero no constituyen el historial oficial de logros de Steam.</p></div>
+        <div><strong>{l('“Achievements” means inferred milestones', '“Logros” significa hitos inferidos')}</strong><p>{l(
+          'Save flags can detect many bosses, Sites of Grace, and progress items, but they are not the official Steam achievement history.',
+          'Las banderas del save permiten detectar muchos jefes, gracias y objetos de progreso, pero no constituyen el historial oficial de logros de Steam.',
+        )}</p></div>
       </div>
       {catalogLimited && (
         <div className="inline-alert inline-alert--warning">
           <AlertTriangle size={20} />
-          <div><strong>Catálogo completo no disponible todavía</strong><p>La lectura base sigue siendo válida, pero los recuentos de progreso pueden estar incompletos hasta que se carguen los datos semánticos.</p></div>
+          <div><strong>{l('The full catalog is not available yet', 'Catálogo completo no disponible todavía')}</strong><p>{l(
+            'Base parsing remains valid, but progress counts may be incomplete until semantic data finishes loading.',
+            'La lectura base sigue siendo válida, pero los recuentos de progreso pueden estar incompletos hasta que se carguen los datos semánticos.',
+          )}</p></div>
         </div>
       )}
 
       <section className="progress-metrics">
-        <MetricCard icon={Skull} label="Jefes/hitos detectados" value={formatNumber(slot.progress.defeatedBosses.length)} detail={slot.progress.totals.bossesKnown ? `sobre ${formatNumber(slot.progress.totals.bossesKnown)} banderas catalogadas` : 'catálogo mínimo'} tone="gold" />
-        <MetricCard icon={MapPin} label="Gracias descubiertas" value={formatNumber(slot.progress.discoveredGraces.length)} detail={slot.progress.totals.gracesKnown ? `sobre ${formatNumber(slot.progress.totals.gracesKnown)} catalogadas` : 'catálogo mínimo'} />
-        <MetricCard icon={BookOpen} label="Recetarios" value={formatNumber(slot.progress.acquiredCookbooks.length)} detail="adquiridos según banderas" />
-        <MetricCard icon={Settings2} label="Hojas de afilar" value={formatNumber(slot.progress.acquiredWhetblades.length)} detail="adquiridas según banderas" />
+        <MetricCard icon={Skull} label={l('Detected bosses/milestones', 'Jefes/hitos detectados')} value={formatNumber(slot.progress.defeatedBosses.length, language)} detail={slot.progress.totals.bossesKnown ? l(`of ${formatNumber(slot.progress.totals.bossesKnown, language)} cataloged flags`, `sobre ${formatNumber(slot.progress.totals.bossesKnown, language)} banderas catalogadas`) : l('minimal catalog', 'catálogo mínimo')} tone="gold" />
+        <MetricCard icon={MapPin} label={l('Discovered Sites of Grace', 'Gracias descubiertas')} value={formatNumber(slot.progress.discoveredGraces.length, language)} detail={slot.progress.totals.gracesKnown ? l(`of ${formatNumber(slot.progress.totals.gracesKnown, language)} cataloged`, `sobre ${formatNumber(slot.progress.totals.gracesKnown, language)} catalogadas`) : l('minimal catalog', 'catálogo mínimo')} />
+        <MetricCard icon={BookOpen} label={l('Cookbooks', 'Recetarios')} value={formatNumber(slot.progress.acquiredCookbooks.length, language)} detail={l('acquired according to flags', 'adquiridos según banderas')} />
+        <MetricCard icon={Settings2} label={l('Whetblades', 'Hojas de afilar')} value={formatNumber(slot.progress.acquiredWhetblades.length, language)} detail={l('acquired according to flags', 'adquiridas según banderas')} />
       </section>
 
-      <ProgressList title="Jefes e hitos ya derrotados" items={slot.progress.defeatedBosses} emptyText="No hay hitos resueltos con el catálogo actualmente cargado." />
-      <ProgressList title="Lugares de gracia ya descubiertos" items={slot.progress.discoveredGraces} emptyText="No hay gracias resueltas con el catálogo actualmente cargado." />
+      <ProgressList title={l('Defeated bosses and milestones', 'Jefes e hitos ya derrotados')} items={slot.progress.defeatedBosses} emptyText={l('No milestones were resolved with the currently loaded catalog.', 'No hay hitos resueltos con el catálogo actualmente cargado.')} />
+      <ProgressList title={l('Discovered Sites of Grace', 'Lugares de gracia ya descubiertos')} items={slot.progress.discoveredGraces} emptyText={l('No Sites of Grace were resolved with the currently loaded catalog.', 'No hay gracias resueltas con el catálogo actualmente cargado.')} />
       <div className="two-column">
-        <ProgressList title="Libros de recetas adquiridos" items={slot.progress.acquiredCookbooks} emptyText="Ninguno detectado." limit={35} />
-        <ProgressList title="Rodamientos de campana adquiridos" items={slot.progress.acquiredBellBearings} emptyText="Ninguno detectado." limit={35} />
+        <ProgressList title={l('Acquired cookbooks', 'Libros de recetas adquiridos')} items={slot.progress.acquiredCookbooks} emptyText={l('None detected.', 'Ninguno detectado.')} limit={35} />
+        <ProgressList title={l('Acquired bell bearings', 'Rodamientos de campana adquiridos')} items={slot.progress.acquiredBellBearings} emptyText={l('None detected.', 'Ninguno detectado.')} limit={35} />
       </div>
-      <ProgressList title="Hojas de afilar adquiridas" items={slot.progress.acquiredWhetblades} emptyText="Ninguna detectada." limit={35} />
+      <ProgressList title={l('Acquired whetblades', 'Hojas de afilar adquiridas')} items={slot.progress.acquiredWhetblades} emptyText={l('None detected.', 'Ninguna detectada.')} limit={35} />
 
       {spoilerMode === 'precise' && missing && (
         <Panel className="spoiler-counts">
-          <SectionHeading icon={EyeOff} eyebrow="Sin nombres" title="Contenido no detectado" description="Solo se muestran cantidades para no revelar identidades ni ubicaciones." />
+          <SectionHeading icon={EyeOff} eyebrow={l('No names', 'Sin nombres')} title={l('Undetected content', 'Contenido no detectado')} description={l('Only quantities are shown to avoid revealing identities or locations.', 'Solo se muestran cantidades para no revelar identidades ni ubicaciones.')} />
           <div className="coverage-grid">
-            <div><strong>{formatNumber(missing.bosses.length)}</strong><span>jefes/hitos no detectados</span></div>
-            <div><strong>{formatNumber(missing.graces.length)}</strong><span>gracias no detectadas</span></div>
-            <div><strong>{formatNumber(missing.cookbooks.length)}</strong><span>recetarios no detectados</span></div>
-            <div><strong>{formatNumber(missing.whetblades.length)}</strong><span>hojas no detectadas</span></div>
+            <div><strong>{formatNumber(missing.bosses.length, language)}</strong><span>{l('undetected bosses/milestones', 'jefes/hitos no detectados')}</span></div>
+            <div><strong>{formatNumber(missing.graces.length, language)}</strong><span>{l('undetected Sites of Grace', 'gracias no detectadas')}</span></div>
+            <div><strong>{formatNumber(missing.cookbooks.length, language)}</strong><span>{l('undetected cookbooks', 'recetarios no detectados')}</span></div>
+            <div><strong>{formatNumber(missing.whetblades.length, language)}</strong><span>{l('undetected whetblades', 'hojas no detectadas')}</span></div>
           </div>
         </Panel>
       )}
@@ -814,15 +926,15 @@ function ProgressTab({
         <div className="completion-zone">
           <div className="inline-alert inline-alert--danger">
             <Eye size={20} />
-            <div><strong>Modo completista activo</strong><p>Las listas siguientes revelan nombres de contenido que el save no marca como completado.</p></div>
+            <div><strong>{l('Completionist mode is active', 'Modo completista activo')}</strong><p>{l('The following lists reveal content names that the save does not mark as complete.', 'Las listas siguientes revelan nombres de contenido que el save no marca como completado.')}</p></div>
           </div>
-          <ProgressList title="Jefes/hitos no detectados" items={missing.bosses} emptyText="No queda ninguno dentro del catálogo cargado." />
-          <ProgressList title="Gracias no detectadas" items={missing.graces} emptyText="No queda ninguna dentro del catálogo cargado." />
+          <ProgressList title={l('Undetected bosses/milestones', 'Jefes/hitos no detectados')} items={missing.bosses} emptyText={l('None remain in the loaded catalog.', 'No queda ninguno dentro del catálogo cargado.')} />
+          <ProgressList title={l('Undetected Sites of Grace', 'Gracias no detectadas')} items={missing.graces} emptyText={l('None remain in the loaded catalog.', 'No queda ninguna dentro del catálogo cargado.')} />
           <div className="two-column">
-            <ProgressList title="Recetarios no detectados" items={missing.cookbooks} emptyText="No queda ninguno." limit={35} />
-            <ProgressList title="Rodamientos no detectados" items={missing.bellBearings} emptyText="No queda ninguno." limit={35} />
+            <ProgressList title={l('Undetected cookbooks', 'Recetarios no detectados')} items={missing.cookbooks} emptyText={l('None remain.', 'No queda ninguno.')} limit={35} />
+            <ProgressList title={l('Undetected bell bearings', 'Rodamientos no detectados')} items={missing.bellBearings} emptyText={l('None remain.', 'No queda ninguno.')} limit={35} />
           </div>
-          <ProgressList title="Hojas de afilar no detectadas" items={missing.whetblades} emptyText="No queda ninguna." limit={35} />
+          <ProgressList title={l('Undetected whetblades', 'Hojas de afilar no detectadas')} items={missing.whetblades} emptyText={l('None remain.', 'No queda ninguna.')} limit={35} />
         </div>
       )}
     </div>
@@ -840,6 +952,7 @@ function ExportTab({
   setPrivacy: Dispatch<SetStateAction<ExportPrivacyOptions>>;
   showToast: (toast: ToastState) => void;
 }) {
+  const { language, l } = useLanguage();
   const semantic = useMemo(() => buildSemanticExport(context), [context]);
   const preview = useMemo(() => jsonText(semantic), [semantic]);
 
@@ -852,17 +965,20 @@ function ExportTab({
       } else {
         downloadText(buildMarkdownReport(context), exportFilename(context.slot, 'ai-report', 'md'), 'text/markdown');
       }
-      showToast({ kind: 'success', message: 'Archivo generado en tu navegador.' });
+      showToast({ kind: 'success', message: l('File generated in your browser.', 'Archivo generado en tu navegador.') });
     } catch (error) {
       showToast({ kind: 'error', message: error instanceof Error ? error.message : String(error) });
     }
   };
 
   const copyPrompt = async () => {
-    const prompt = `Analiza mi partida de Elden Ring usando el JSON adjunto. No reveles contenido futuro que no aparezca ya como descubierto, obtenido o derrotado. Separa hechos, inferencias y recomendaciones; prioriza optimizar mi build y señalar cosas útiles que ya puedo hacer sin editar el save.\n\n${preview}`;
+    const prompt = `${l(
+      'Analyze my Elden Ring save using the attached JSON. Do not reveal future content unless it already appears as discovered, obtained, or defeated. Separate facts, inferences, and recommendations; prioritize optimizing my build and identifying useful things I can already do without editing the save.',
+      'Analiza mi partida de Elden Ring usando el JSON adjunto. No reveles contenido futuro que no aparezca ya como descubierto, obtenido o derrotado. Separa hechos, inferencias y recomendaciones; prioriza optimizar mi build y señalar cosas útiles que ya puedo hacer sin editar el save.',
+    )}\n\n${preview}`;
     try {
-      await copyText(prompt);
-      showToast({ kind: 'success', message: 'Prompt y JSON copiados al portapapeles.' });
+      await copyText(prompt, language);
+      showToast({ kind: 'success', message: l('Prompt and JSON copied to the clipboard.', 'Prompt y JSON copiados al portapapeles.') });
     } catch (error) {
       showToast({ kind: 'error', message: error instanceof Error ? error.message : String(error) });
     }
@@ -874,37 +990,37 @@ function ExportTab({
     <div className="tab-stack">
       <div className="two-column two-column--wide-left">
         <Panel>
-          <SectionHeading icon={Bot} eyebrow="Modelo de lenguaje" title="JSON semántico listo para IA" description="Conserva el significado útil, elimina bytes opacos y aplica las opciones de privacidad de la derecha." />
+          <SectionHeading icon={Bot} eyebrow={l('Language model', 'Modelo de lenguaje')} title={l('AI-ready semantic JSON', 'JSON semántico listo para IA')} description={l('Preserves useful meaning, removes opaque bytes, and applies the privacy options on the right.', 'Conserva el significado útil, elimina bytes opacos y aplica las opciones de privacidad de la derecha.')} />
           <div className="export-actions">
-            <button className="primary-button" type="button" onClick={() => doDownload('semantic')}><Download size={18} /> Descargar JSON semántico</button>
-            <button className="secondary-button" type="button" onClick={copyPrompt}><Clipboard size={18} /> Copiar prompt + JSON</button>
-            <button className="secondary-button" type="button" onClick={() => doDownload('markdown')}><ScrollText size={18} /> Informe Markdown</button>
-            <button className="ghost-button" type="button" onClick={() => doDownload('forensic')}><Database size={18} /> JSON forense</button>
+            <button className="primary-button" type="button" onClick={() => doDownload('semantic')}><Download size={18} /> {l('Download semantic JSON', 'Descargar JSON semántico')}</button>
+            <button className="secondary-button" type="button" onClick={copyPrompt}><Clipboard size={18} /> {l('Copy prompt + JSON', 'Copiar prompt + JSON')}</button>
+            <button className="secondary-button" type="button" onClick={() => doDownload('markdown')}><ScrollText size={18} /> {l('Markdown report', 'Informe Markdown')}</button>
+            <button className="ghost-button" type="button" onClick={() => doDownload('forensic')}><Database size={18} /> {l('Forensic JSON', 'JSON forense')}</button>
           </div>
           <div className="code-preview">
-            <div className="code-preview__top"><span><FileJson size={16} /> Vista previa</span><small>{formatBytes(new Blob([preview]).size)}</small></div>
-            <pre>{preview.slice(0, 18_000)}{preview.length > 18_000 ? '\n… vista previa truncada; la descarga contiene todo.' : ''}</pre>
+            <div className="code-preview__top"><span><FileJson size={16} /> {l('Preview', 'Vista previa')}</span><small>{formatBytes(new Blob([preview]).size, language)}</small></div>
+            <pre>{preview.slice(0, 18_000)}{preview.length > 18_000 ? l('\n… preview truncated; the download contains everything.', '\n… vista previa truncada; la descarga contiene todo.') : ''}</pre>
           </div>
         </Panel>
 
         <div className="side-stack">
           <Panel>
-            <SectionHeading icon={LockKeyhole} eyebrow="Privacidad" title="Qué permites exportar" description="Steam IDs, ubicación exacta y datos forenses están desactivados por defecto." />
+            <SectionHeading icon={LockKeyhole} eyebrow={l('Privacy', 'Privacidad')} title={l('What you allow in exports', 'Qué permites exportar')} description={l('Steam IDs, exact location, and forensic data are disabled by default.', 'Steam IDs, ubicación exacta y datos forenses están desactivados por defecto.')} />
             <div className="toggle-stack">
-              <Toggle checked={privacy.includeSteamIds} onChange={(value) => update('includeSteamIds', value)} title="Identificadores de Steam" description="Incluye el Steam ID global y el del personaje." warning />
-              <Toggle checked={privacy.includeCoordinates} onChange={(value) => update('includeCoordinates', value)} title="Coordenadas precisas" description="Incluye posición, mapa, orientación, montura y mancha." warning />
-              <Toggle checked={privacy.includeRawInternalIds} onChange={(value) => update('includeRawInternalIds', value)} title="IDs internos" description="Handles, IDs de objetos, offsets y banderas individuales." />
-              <Toggle checked={privacy.includeRawEventFlags} onChange={(value) => update('includeRawEventFlags', value)} title="Bitfield completo de eventos" description={`Añade ${formatBytes(context.slot.raw.eventFlags.byteLength)} en Base64; el JSON crecerá mucho.`} warning />
+              <Toggle checked={privacy.includeSteamIds} onChange={(value) => update('includeSteamIds', value)} title={l('Steam identifiers', 'Identificadores de Steam')} description={l('Includes the global and character Steam IDs.', 'Incluye el Steam ID global y el del personaje.')} warning />
+              <Toggle checked={privacy.includeCoordinates} onChange={(value) => update('includeCoordinates', value)} title={l('Precise coordinates', 'Coordenadas precisas')} description={l('Includes position, map, orientation, mount, and bloodstain.', 'Incluye posición, mapa, orientación, montura y mancha.')} warning />
+              <Toggle checked={privacy.includeRawInternalIds} onChange={(value) => update('includeRawInternalIds', value)} title={l('Internal IDs', 'IDs internos')} description={l('Handles, item IDs, offsets, and individual flags.', 'Handles, IDs de objetos, offsets y banderas individuales.')} />
+              <Toggle checked={privacy.includeRawEventFlags} onChange={(value) => update('includeRawEventFlags', value)} title={l('Complete event bitfield', 'Bitfield completo de eventos')} description={l(`Adds ${formatBytes(context.slot.raw.eventFlags.byteLength, language)} as Base64; the JSON will grow substantially.`, `Añade ${formatBytes(context.slot.raw.eventFlags.byteLength, language)} en Base64; el JSON crecerá mucho.`)} warning />
             </div>
           </Panel>
           <Panel>
-            <SectionHeading icon={ShieldCheck} eyebrow="Reglas aplicadas" title="Exportación segura" />
+            <SectionHeading icon={ShieldCheck} eyebrow={l('Applied rules', 'Reglas aplicadas')} title={l('Safe export', 'Exportación segura')} />
             <ul className="check-list">
-              <li><CheckCircle2 size={16} /> No incluye rutas locales del ordenador.</li>
-              <li><CheckCircle2 size={16} /> No contiene el archivo binario original.</li>
-              <li><CheckCircle2 size={16} /> Distingue hitos inferidos de logros oficiales.</li>
-              <li><CheckCircle2 size={16} /> Conserva el nivel de spoilers seleccionado.</li>
-              <li><Info size={16} /> Sí incluye el nombre visible del personaje y el nombre base del archivo.</li>
+              <li><CheckCircle2 size={16} /> {l('Does not include local computer paths.', 'No incluye rutas locales del ordenador.')}</li>
+              <li><CheckCircle2 size={16} /> {l('Does not contain the original binary file.', 'No contiene el archivo binario original.')}</li>
+              <li><CheckCircle2 size={16} /> {l('Separates inferred milestones from official achievements.', 'Distingue hitos inferidos de logros oficiales.')}</li>
+              <li><CheckCircle2 size={16} /> {l('Preserves the selected spoiler level.', 'Conserva el nivel de spoilers seleccionado.')}</li>
+              <li><Info size={16} /> {l("Includes the visible character name and the file's base name.", 'Sí incluye el nombre visible del personaje y el nombre base del archivo.')}</li>
             </ul>
           </Panel>
         </div>
@@ -914,29 +1030,30 @@ function ExportTab({
 }
 
 function RawTab({ save, slot }: { save: ParsedSave; slot: SemanticSlot }) {
+  const { language, l } = useLanguage();
   return (
     <div className="tab-stack">
       <div className="three-column">
-        <MetricCard icon={ShieldCheck} label="Integridad de ranura" value={slot.raw.integrity.valid ? 'MD5 válido' : 'No coincide'} detail={`${slot.raw.integrity.computedMd5Hex.slice(0, 12)}…`} tone={slot.raw.integrity.valid ? 'good' : 'warning'} />
-        <MetricCard icon={Database} label="Versión interna" value={String(slot.raw.version)} detail={`Base ${slot.raw.baseVersion.value}`} />
-        <MetricCard icon={FileSearch} label="Fin del parseo" value={formatOffset(slot.raw.parseEndOffset)} detail={`${formatNumber(slot.raw.opaqueSections.length)} secciones opacas`} />
+        <MetricCard icon={ShieldCheck} label={l('Slot integrity', 'Integridad de ranura')} value={slot.raw.integrity.valid ? l('Valid MD5', 'MD5 válido') : l('Mismatch', 'No coincide')} detail={`${slot.raw.integrity.computedMd5Hex.slice(0, 12)}…`} tone={slot.raw.integrity.valid ? 'good' : 'warning'} />
+        <MetricCard icon={Database} label={l('Internal version', 'Versión interna')} value={String(slot.raw.version)} detail={`Base ${slot.raw.baseVersion.value}`} />
+        <MetricCard icon={FileSearch} label={l('Parser end', 'Fin del parseo')} value={formatOffset(slot.raw.parseEndOffset)} detail={l(`${formatNumber(slot.raw.opaqueSections.length, language)} opaque sections`, `${formatNumber(slot.raw.opaqueSections.length, language)} secciones opacas`)} />
       </div>
 
       {save.warnings.length > 0 && (
         <Panel>
-          <SectionHeading icon={AlertTriangle} eyebrow="Parser" title="Avisos" />
+          <SectionHeading icon={AlertTriangle} eyebrow="Parser" title={l('Warnings', 'Avisos')} />
           <ul className="warning-list">{save.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
         </Panel>
       )}
 
       <Panel>
-        <SectionHeading icon={UserRound} eyebrow="UserData10" title="Tabla de perfiles" description="Las ranuras vacías también se conservan en el índice global." />
+        <SectionHeading icon={UserRound} eyebrow="UserData10" title={l('Profile table', 'Tabla de perfiles')} description={l('Empty slots are also retained in the global index.', 'Las ranuras vacías también se conservan en el índice global.')} />
         <div className="profile-table">
-          <div className="profile-row profile-row--head"><span>Ranura</span><span>Estado</span><span>Nombre</span><span>Nivel</span><span>Tiempo</span></div>
+          <div className="profile-row profile-row--head"><span>{l('Slot', 'Ranura')}</span><span>{l('Status', 'Estado')}</span><span>{l('Name', 'Nombre')}</span><span>{l('Level', 'Nivel')}</span><span>{l('Time', 'Tiempo')}</span></div>
           {save.profiles.map((profile) => (
             <div className="profile-row" key={profile.slotIndex}>
               <strong>{profile.slotIndex + 1}</strong>
-              <span><StatusPill tone={profile.active ? 'good' : 'neutral'}>{profile.active ? 'Activa' : 'Vacía'}</StatusPill></span>
+              <span><StatusPill tone={profile.active ? 'good' : 'neutral'}>{profile.active ? l('Active', 'Activa') : l('Empty', 'Vacía')}</StatusPill></span>
               <span>{profile.name || '—'}</span><span>{profile.active ? profile.level : '—'}</span><span>{profile.active ? formatDuration(profile.secondsPlayed) : '—'}</span>
             </div>
           ))}
@@ -944,9 +1061,9 @@ function RawTab({ save, slot }: { save: ParsedSave; slot: SemanticSlot }) {
       </Panel>
 
       <Panel>
-        <SectionHeading icon={Layers3} eyebrow="Cobertura honesta" title="Índice de secciones opacas" description="Se conocen el desplazamiento y tamaño, pero no se les atribuye una semántica no verificada." />
+        <SectionHeading icon={Layers3} eyebrow={l('Honest coverage', 'Cobertura honesta')} title={l('Opaque section index', 'Índice de secciones opacas')} description={l('The offset and size are known, but no unverified meaning is assigned.', 'Se conocen el desplazamiento y tamaño, pero no se les atribuye una semántica no verificada.')} />
         <div className="opaque-table">
-          <div className="opaque-row opaque-row--head"><span>Sección</span><span>Offset absoluto</span><span>Tamaño</span><span>Vista previa</span></div>
+          <div className="opaque-row opaque-row--head"><span>{l('Section', 'Sección')}</span><span>{l('Absolute offset', 'Offset absoluto')}</span><span>{l('Size', 'Tamaño')}</span><span>{l('Preview', 'Vista previa')}</span></div>
           {slot.raw.opaqueSections.map((section, index) => (
             <div className="opaque-row" key={`${section.name}-${index}`}>
               <code>{section.name}</code><code>{formatOffset(section.offset)}</code><span>{formatBytes(section.length)}</span><code>{section.previewHex ? `${section.previewHex.slice(0, 24)}…` : '—'}</code>
@@ -956,12 +1073,12 @@ function RawTab({ save, slot }: { save: ParsedSave; slot: SemanticSlot }) {
       </Panel>
 
       <Panel>
-        <SectionHeading icon={Database} eyebrow="Bloques grandes" title="Datos preservados" />
+        <SectionHeading icon={Database} eyebrow={l('Large blocks', 'Bloques grandes')} title={l('Preserved data', 'Datos preservados')} />
         <div className="coverage-grid">
-          <div><strong>{formatBytes(slot.raw.eventFlags.byteLength)}</strong><span>banderas de evento</span></div>
-          <div><strong>{formatNumber(slot.raw.gaItems.length)}</strong><span>GAItems no vacíos</span></div>
-          <div><strong>{formatNumber(slot.raw.heldInventory.commonItems.length + slot.raw.heldInventory.keyItems.length)}</strong><span>entradas portadas</span></div>
-          <div><strong>{formatNumber(slot.raw.chestInventory.commonItems.length + slot.raw.chestInventory.keyItems.length)}</strong><span>entradas del baúl</span></div>
+          <div><strong>{formatBytes(slot.raw.eventFlags.byteLength, language)}</strong><span>{l('event flags', 'banderas de evento')}</span></div>
+          <div><strong>{formatNumber(slot.raw.gaItems.length, language)}</strong><span>{l('non-empty GAItems', 'GAItems no vacíos')}</span></div>
+          <div><strong>{formatNumber(slot.raw.heldInventory.commonItems.length + slot.raw.heldInventory.keyItems.length, language)}</strong><span>{l('held entries', 'entradas portadas')}</span></div>
+          <div><strong>{formatNumber(slot.raw.chestInventory.commonItems.length + slot.raw.chestInventory.keyItems.length, language)}</strong><span>{l('chest entries', 'entradas del baúl')}</span></div>
         </div>
       </Panel>
     </div>
@@ -995,10 +1112,11 @@ function Dashboard({
   toast: ToastState | null;
   showToast: (toast: ToastState) => void;
 }) {
+  const { language, l } = useLanguage();
   const [activeTab, setActiveTab] = useState<TabId>('summary');
   const slot = slots.find((item) => item.slotIndex === selectedSlotId) ?? slots[0];
   if (!slot) return null;
-  const context: ExportContext = { save, slot, catalog, privacy, spoilerMode };
+  const context: ExportContext = { save, slot, catalog, privacy, spoilerMode, language };
 
   return (
     <main className="dashboard">
@@ -1006,26 +1124,26 @@ function Dashboard({
         <div className="character-hero__identity">
           <span className="character-rune" aria-hidden="true">{slot.identity.level}</span>
           <div>
-            <div className="hero-kicker"><span>Ranura {slot.slotIndex + 1}</span><span>·</span><span>{slot.identity.className}</span></div>
+            <div className="hero-kicker"><span>{l(`Slot ${slot.slotIndex + 1}`, `Ranura ${slot.slotIndex + 1}`)}</span><span>·</span><span>{slot.identity.className}</span></div>
             <h2>{slot.identity.name}</h2>
             <p>{slot.build.summary}</p>
             <div className="hero-pills">
-              <StatusPill tone="gold" icon={Gauge}>Nivel {slot.identity.level}</StatusPill>
-              <StatusPill tone={slot.raw.integrity.valid ? 'good' : 'danger'} icon={slot.raw.integrity.valid ? ShieldCheck : AlertTriangle}>{slot.raw.integrity.valid ? 'Checksum correcto' : 'Checksum no válido'}</StatusPill>
-              <StatusPill icon={EyeOff}>{SPOILER_OPTIONS.find((option) => option.value === spoilerMode)?.label}</StatusPill>
+              <StatusPill tone="gold" icon={Gauge}>{l(`Level ${slot.identity.level}`, `Nivel ${slot.identity.level}`)}</StatusPill>
+              <StatusPill tone={slot.raw.integrity.valid ? 'good' : 'danger'} icon={slot.raw.integrity.valid ? ShieldCheck : AlertTriangle}>{slot.raw.integrity.valid ? l('Valid checksum', 'Checksum correcto') : l('Invalid checksum', 'Checksum no válido')}</StatusPill>
+              <StatusPill icon={EyeOff}>{spoilerOptions(language).find((option) => option.value === spoilerMode)?.label}</StatusPill>
             </div>
           </div>
         </div>
         <div className="character-hero__controls">
           {slots.length > 1 && (
-            <label className="slot-select"><span>Personaje</span><select value={selectedSlotId} onChange={(event: ChangeEvent<HTMLSelectElement>) => onSelectSlot(Number(event.target.value))}>{slots.map((item) => <option value={item.slotIndex} key={item.slotIndex}>{item.identity.name} · nivel {item.identity.level}</option>)}</select></label>
+            <label className="slot-select"><span>{l('Character', 'Personaje')}</span><select value={selectedSlotId} onChange={(event: ChangeEvent<HTMLSelectElement>) => onSelectSlot(Number(event.target.value))}>{slots.map((item) => <option value={item.slotIndex} key={item.slotIndex}>{item.identity.name} · {l('level', 'nivel')} {item.identity.level}</option>)}</select></label>
           )}
-          <button className="secondary-button" type="button" onClick={onReset}><UploadCloud size={17} /> Analizar otro save</button>
+          <button className="secondary-button" type="button" onClick={onReset}><UploadCloud size={17} /> {l('Analyze another save', 'Analizar otro save')}</button>
         </div>
       </section>
 
-      <nav className="tab-nav" aria-label="Secciones del análisis">
-        {TABS.map((tab) => {
+      <nav className="tab-nav" aria-label={l('Analysis sections', 'Secciones del análisis')}>
+        {tabs(language).map((tab) => {
           const Icon = tab.icon;
           return <button type="button" key={tab.id} className={activeTab === tab.id ? 'tab-nav__active' : undefined} onClick={() => setActiveTab(tab.id)}><Icon size={17} />{tab.label}</button>;
         })}
@@ -1052,13 +1170,21 @@ function Dashboard({
 }
 
 export default function App() {
-  const [catalog, setCatalog] = useState<SemanticCatalog>(() => getFallbackCatalog());
-  const [catalogStatus, setCatalogStatus] = useState('Catálogo mínimo');
+  const [language, setLanguage] = useState<AppLanguage>(() => {
+    const stored = window.localStorage.getItem('eldenring-savegame-analyzer.language');
+    return isAppLanguage(stored) ? stored : DEFAULT_LANGUAGE;
+  });
+  const l = useCallback(
+    (english: string, spanish: string) => localize(language, english, spanish),
+    [language],
+  );
+  const [catalog, setCatalog] = useState<SemanticCatalog>(() => getFallbackCatalog(language));
+  const [catalogStatus, setCatalogStatus] = useState(localize(language, 'Minimal catalog', 'Catálogo mínimo'));
   const [save, setSave] = useState<ParsedSave | null>(null);
   const [selectedSlotId, setSelectedSlotId] = useState(0);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [stage, setStage] = useState('Preparando…');
+  const [stage, setStage] = useState(localize(language, 'Preparing…', 'Preparando…'));
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [spoilerMode, setSpoilerMode] = useState<SpoilerMode>('safe');
@@ -1074,20 +1200,34 @@ export default function App() {
 
   useEffect(() => {
     let alive = true;
-    void loadSemanticCatalog((message) => alive && setCatalogStatus(message)).then((loaded) => {
+    document.documentElement.lang = language;
+    document.querySelector('meta[name="description"]')?.setAttribute(
+      'content',
+      l(
+        'A local, semantic, read-only analyzer for Elden Ring PC save files.',
+        'Analizador local, semántico y de solo lectura para partidas de Elden Ring en PC.',
+      ),
+    );
+    window.localStorage.setItem('eldenring-savegame-analyzer.language', language);
+    setCatalog(getFallbackCatalog(language));
+    setCatalogStatus(l('Minimal catalog', 'Catálogo mínimo'));
+    void loadSemanticCatalog((message) => alive && setCatalogStatus(message), language).then((loaded) => {
       if (!alive) return;
       setCatalog(loaded);
-      setCatalogStatus(loaded.loadedSources.length > 1 ? 'Catálogo listo' : 'Catálogo mínimo');
+      setCatalogStatus(loaded.loadedSources.length > 1 ? l('Catalog ready', 'Catálogo listo') : l('Minimal catalog', 'Catálogo mínimo'));
     });
     return () => { alive = false; };
-  }, []);
+  }, [language, l]);
 
   useEffect(() => () => {
     workerRef.current?.terminate();
     if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
   }, []);
 
-  const semanticSlots = useMemo(() => save ? createSemanticSlots(save.slots, catalog) : [], [save, catalog]);
+  const semanticSlots = useMemo(
+    () => save ? createSemanticSlots(save.slots, catalog, language) : [],
+    [save, catalog, language],
+  );
 
   useEffect(() => {
     if (semanticSlots.length > 0 && !semanticSlots.some((slot) => slot.slotIndex === selectedSlotId)) {
@@ -1104,21 +1244,30 @@ export default function App() {
   const parseFile = useCallback(async (file: File) => {
     setError(null);
     if (!isAcceptedFile(file)) {
-      setError('Selecciona un archivo de partida PC con extensión .sl2 o .co2.');
+      setError(l(
+        'Select a PC save file with an .sl2 or .co2 extension.',
+        'Selecciona un archivo de partida PC con extensión .sl2 o .co2.',
+      ));
       return;
     }
     if (file.size < 25_000_000) {
-      setError(`El archivo solo ocupa ${formatBytes(file.size)}; una partida PC completa debería rondar 28 MiB.`);
+      setError(l(
+        `The file is only ${formatBytes(file.size, language)}; a complete PC save should be around 28 MiB.`,
+        `El archivo solo ocupa ${formatBytes(file.size, language)}; una partida PC completa debería rondar 28 MiB.`,
+      ));
       return;
     }
     if (file.size > 64 * 1024 * 1024) {
-      setError(`El archivo ocupa ${formatBytes(file.size)} y supera el límite de seguridad de 64 MiB.`);
+      setError(l(
+        `The file is ${formatBytes(file.size, language)} and exceeds the 64 MiB safety limit.`,
+        `El archivo ocupa ${formatBytes(file.size, language)} y supera el límite de seguridad de 64 MiB.`,
+      ));
       return;
     }
 
     setBusy(true);
     setProgress(0.01);
-    setStage('Leyendo el archivo local…');
+    setStage(l('Reading the local file…', 'Leyendo el archivo local…'));
     workerRef.current?.terminate();
 
     try {
@@ -1142,16 +1291,16 @@ export default function App() {
         setSave(response.save);
         setSelectedSlotId(response.save.slots[0]?.slotIndex ?? 0);
         setProgress(1);
-        setStage('Análisis terminado');
+        setStage(l('Analysis complete', 'Análisis terminado'));
         setSpoilerMode('safe');
         setPrivacy({ includeSteamIds: false, includeCoordinates: false, includeRawEventFlags: false, includeRawInternalIds: false });
       };
       worker.onerror = (event) => {
         worker.terminate(); workerRef.current = null; setBusy(false);
-        setError(event.message || 'El worker de análisis ha fallado.');
+        setError(event.message || l('The analysis worker failed.', 'El worker de análisis ha fallado.'));
       };
       const request: WorkerParseRequest = {
-        type: 'parse', fileName: file.name, fileSize: file.size, lastModified: file.lastModified, buffer,
+        type: 'parse', language, fileName: file.name, fileSize: file.size, lastModified: file.lastModified, buffer,
       };
       worker.postMessage(request, [buffer]);
     } catch (caught) {
@@ -1160,16 +1309,17 @@ export default function App() {
       setBusy(false);
       setError(caught instanceof Error ? caught.message : String(caught));
     }
-  }, []);
+  }, [language, l]);
 
   const reset = () => {
     workerRef.current?.terminate(); workerRef.current = null;
-    setSave(null); setError(null); setBusy(false); setProgress(0); setStage('Preparando…'); setToast(null);
+    setSave(null); setError(null); setBusy(false); setProgress(0); setStage(l('Preparing…', 'Preparando…')); setToast(null);
   };
 
   return (
+    <LanguageContext.Provider value={{ language, l }}>
     <div className="app-shell">
-      <AppHeader catalog={catalog} catalogStatus={catalogStatus} />
+      <AppHeader catalog={catalog} catalogStatus={catalogStatus} language={language} onLanguage={setLanguage} />
       {!save ? (
         <UploadScreen busy={busy} progress={progress} stage={stage} dragging={dragging} error={error} onFile={parseFile} onDragState={setDragging} />
       ) : (
@@ -1189,9 +1339,16 @@ export default function App() {
         />
       )}
       <footer className="app-footer">
-        <span>Elden Ring Savegame Analyzer · proyecto comunitario no afiliado a FromSoftware, Bandai Namco ni Valve.</span>
-        <span>Parser de solo lectura · Los nombres semánticos tienen atribución en <code>THIRD_PARTY_NOTICES.md</code>.</span>
+        <span>{l(
+          'Elden Ring Savegame Analyzer · a community project not affiliated with FromSoftware, Bandai Namco, or Valve.',
+          'Elden Ring Savegame Analyzer · proyecto comunitario no afiliado a FromSoftware, Bandai Namco ni Valve.',
+        )}</span>
+        <span>{l(
+          'Read-only parser · Semantic names are attributed in',
+          'Parser de solo lectura · Los nombres semánticos tienen atribución en',
+        )} <code>THIRD_PARTY_NOTICES.md</code>.</span>
       </footer>
     </div>
+    </LanguageContext.Provider>
   );
 }
