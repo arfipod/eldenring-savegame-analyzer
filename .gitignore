@@ -1,0 +1,13 @@
+node_modules
+dist
+.vite
+*.log
+.DS_Store
+coverage
+
+# Never commit user saves or generated personal exports.
+*.sl2
+*.co2
+*-semantic-ai.json
+*-forensic.json
+*-ai-report.md

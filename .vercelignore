@@ -1,0 +1,6 @@
+node_modules
+dist
+coverage
+*.sl2
+*.co2
+*.zip
