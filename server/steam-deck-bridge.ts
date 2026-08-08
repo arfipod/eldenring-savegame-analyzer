@@ -1,5 +1,9 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { isIP } from 'node:net';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { Client, type ConnectConfig, type FileEntryWithStats, type SFTPWrapper, type Stats } from 'ssh2';
 import type { Plugin } from 'vite';
 
@@ -8,7 +12,10 @@ export const MAX_SAVE_BYTES = 64 * 1024 * 1024;
 
 const MAX_REQUEST_BYTES = 8 * 1024;
 const MAX_OS_RELEASE_BYTES = 64 * 1024;
+const MAX_KNOWN_HOSTS_BYTES = 1024 * 1024;
 const MAX_ACCOUNT_DIRECTORIES = 64;
+const MAX_DIRECTORY_ENTRIES = 128;
+const MIN_SAVE_BYTES = 25_000_000;
 const CONNECT_TIMEOUT_MS = 12_000;
 const STEAM_APP_ID = '1245620';
 
@@ -41,6 +48,10 @@ export function isPrivateIpv4(host: string): boolean {
     || first === 127
     || (first === 172 && second >= 16 && second <= 31)
     || (first === 192 && second === 168);
+}
+
+export function isLoopbackAddress(address: string | undefined): boolean {
+  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
 }
 
 export function validateDeckRequest(value: unknown): SteamDeckCredentials {
@@ -76,6 +87,70 @@ export function isSteamDeckOsRelease(contents: string): boolean {
   return values.get('ID') === 'steamos' || values.get('VARIANT_ID') === 'steamdeck';
 }
 
+export function knownHostPatternMatches(pattern: string, host: string): boolean {
+  if (pattern === host || pattern === `[${host}]:22`) return true;
+  if (!pattern.startsWith('|1|')) return false;
+  const parts = pattern.split('|');
+  if (parts.length !== 4 || !parts[2] || !parts[3]) return false;
+  try {
+    const salt = Buffer.from(parts[2], 'base64');
+    const expected = Buffer.from(parts[3], 'base64');
+    const actual = createHmac('sha1', salt).update(host).digest();
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
+  } catch {
+    return false;
+  }
+}
+
+export function parseTrustedHostKeys(contents: string, host: string): Set<string> {
+  const trustedKeys = new Set<string>();
+  for (const rawLine of contents.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const fields = line.split(/\s+/);
+    if (fields[0]?.startsWith('@')) continue;
+    if (fields.length < 3) continue;
+    const patterns = fields[0].split(',');
+    if (!patterns.some((pattern) => knownHostPatternMatches(pattern, host))) continue;
+    try {
+      const encodedKey = fields[2];
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encodedKey)) continue;
+      const key = Buffer.from(encodedKey, 'base64');
+      const canonicalKey = key.toString('base64');
+      if (key.length < 1 || canonicalKey.replace(/=+$/, '') !== encodedKey.replace(/=+$/, '')) continue;
+      trustedKeys.add(canonicalKey);
+    } catch {
+      // Malformed entries are ignored.
+    }
+  }
+  return trustedKeys;
+}
+
+function loadTrustedHostKeys(host: string): Set<string> {
+  const path = join(homedir(), '.ssh', 'known_hosts');
+  let descriptor: number | null = null;
+  try {
+    descriptor = openSync(path, 'r');
+    const attributes = fstatSync(descriptor);
+    if (!attributes.isFile() || !Number.isSafeInteger(attributes.size) || attributes.size < 1 || attributes.size > MAX_KNOWN_HOSTS_BYTES) {
+      throw new BridgeError('The local SSH known_hosts file is not plausible.', 428);
+    }
+    const buffer = Buffer.alloc(attributes.size);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const bytesRead = readSync(descriptor, buffer, offset, buffer.length - offset, offset);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    return parseTrustedHostKeys(buffer.subarray(0, offset).toString('utf8'), host);
+  } catch (error) {
+    if (error instanceof BridgeError) throw error;
+    return new Set();
+  } finally {
+    if (descriptor !== null) closeSync(descriptor);
+  }
+}
+
 export function selectLatestSaveCandidate(candidates: SaveCandidate[]): SaveCandidate | null {
   return [...candidates].sort((left, right) => {
     if (right.modifiedAtSeconds !== left.modifiedAtSeconds) {
@@ -90,17 +165,21 @@ function readRequestJson(request: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let received = 0;
+    let tooLarge = false;
 
     request.on('data', (chunk: Buffer) => {
       received += chunk.length;
       if (received > MAX_REQUEST_BYTES) {
-        reject(new BridgeError('The request is too large.', 413));
-        request.destroy();
+        tooLarge = true;
         return;
       }
       chunks.push(chunk);
     });
     request.on('end', () => {
+      if (tooLarge) {
+        reject(new BridgeError('The request is too large.', 413));
+        return;
+      }
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
       } catch {
@@ -112,6 +191,13 @@ function readRequestJson(request: IncomingMessage): Promise<unknown> {
 }
 
 function connect(credentials: SteamDeckCredentials): Promise<Client> {
+  const trustedHostKeys = loadTrustedHostKeys(credentials.host);
+  if (trustedHostKeys.size === 0) {
+    throw new BridgeError(
+      'The Steam Deck host key is not trusted. Verify it once with OpenSSH, then retry.',
+      428,
+    );
+  }
   return new Promise((resolve, reject) => {
     const client = new Client();
     let settled = false;
@@ -137,6 +223,7 @@ function connect(credentials: SteamDeckCredentials): Promise<Client> {
       readyTimeout: CONNECT_TIMEOUT_MS,
       keepaliveInterval: 4_000,
       keepaliveCountMax: 2,
+      hostVerifier: (key: Buffer) => trustedHostKeys.has(key.toString('base64')),
     };
     client.connect(config);
   });
@@ -157,10 +244,47 @@ function stat(sftp: SFTPWrapper, path: string): Promise<Stats> {
   });
 }
 
-function readDirectory(sftp: SFTPWrapper, path: string): Promise<FileEntryWithStats[]> {
+function openDirectory(sftp: SFTPWrapper, path: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    sftp.readdir(path, (error, entries) => error ? reject(error) : resolve(entries));
+    sftp.opendir(path, (error, handle) => error ? reject(error) : resolve(handle));
   });
+}
+
+function readDirectoryBatch(sftp: SFTPWrapper, handle: Buffer): Promise<FileEntryWithStats[] | null> {
+  return new Promise((resolve, reject) => {
+    sftp.readdir(handle, (error, entries) => {
+      if (error && (error as Error & { code?: number }).code === 1) resolve(null);
+      else if (error) reject(error);
+      else resolve(entries);
+    });
+  });
+}
+
+function closeHandle(sftp: SFTPWrapper, handle: Buffer): Promise<void> {
+  return new Promise((resolve) => sftp.close(handle, () => resolve()));
+}
+
+async function readBoundedDirectory(sftp: SFTPWrapper, path: string): Promise<FileEntryWithStats[]> {
+  const handle = await openDirectory(sftp, path);
+  const entries: FileEntryWithStats[] = [];
+  try {
+    while (entries.length <= MAX_DIRECTORY_ENTRIES) {
+      const batch = await readDirectoryBatch(sftp, handle);
+      if (!batch) return entries;
+      if (entries.length + batch.length > MAX_DIRECTORY_ENTRIES) {
+        throw new BridgeError('The Steam save directory contains too many entries.', 422);
+      }
+      for (const entry of batch) {
+        if (Buffer.byteLength(entry.filename, 'utf8') > 255) {
+          throw new BridgeError('The Steam save directory contains an invalid entry.', 422);
+        }
+        entries.push(entry);
+      }
+    }
+    throw new BridgeError('The Steam save directory contains too many entries.', 422);
+  } finally {
+    await closeHandle(sftp, handle);
+  }
 }
 
 async function readBoundedText(sftp: SFTPWrapper, path: string, limit: number): Promise<string> {
@@ -197,7 +321,7 @@ async function findSave(sftp: SFTPWrapper, username: string): Promise<SaveCandid
     const savesRoot = `${steamRoot}/compatdata/${STEAM_APP_ID}/pfx/drive_c/users/steamuser/AppData/Roaming/EldenRing`;
     let entries: FileEntryWithStats[];
     try {
-      entries = await readDirectory(sftp, savesRoot);
+      entries = await readBoundedDirectory(sftp, savesRoot);
     } catch {
       continue;
     }
@@ -211,7 +335,7 @@ async function findSave(sftp: SFTPWrapper, username: string): Promise<SaveCandid
         const path = `${savesRoot}/${account.filename}/${fileName}`;
         try {
           const attributes = await stat(sftp, path);
-          if (!attributes.isFile() || attributes.size < 1 || attributes.size > MAX_SAVE_BYTES) continue;
+          if (!attributes.isFile() || attributes.size < MIN_SAVE_BYTES || attributes.size > MAX_SAVE_BYTES) continue;
           candidates.push({
             path,
             fileName,
@@ -260,6 +384,14 @@ async function handleSteamDeckRequest(request: IncomingMessage, response: Server
   }
   if (!sameOrigin(request)) {
     sendJson(response, 403, { error: 'Cross-origin requests are not allowed.' });
+    return;
+  }
+  if (!isLoopbackAddress(request.socket.remoteAddress)) {
+    sendJson(response, 403, { error: 'Steam Deck access is only available through localhost.' });
+    return;
+  }
+  if (!request.headers['content-type']?.toLowerCase().startsWith('application/json')) {
+    sendJson(response, 415, { error: 'The request must use application/json.' });
     return;
   }
 

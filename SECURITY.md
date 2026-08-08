@@ -15,6 +15,8 @@
 The Vite development and preview servers expose a same-origin, loopback-only UI flow for read-only SSH/SFTP retrieval. The bridge:
 
 - accepts only private IPv4 targets and syntactically valid Linux usernames;
+- accepts requests only from a loopback client on the same origin;
+- requires the remote host key to match an existing OpenSSH `known_hosts` entry before password authentication;
 - limits request bodies, remote identity reads, directory scans, and save streams;
 - verifies `/etc/os-release` identifies SteamOS before searching for a save;
 - searches only fixed Proton paths for app ID `1245620`;

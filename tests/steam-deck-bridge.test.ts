@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   isPrivateIpv4,
+  isLoopbackAddress,
   isSteamDeckOsRelease,
+  knownHostPatternMatches,
+  parseTrustedHostKeys,
   selectLatestSaveCandidate,
   validateDeckRequest,
 } from '../server/steam-deck-bridge';
@@ -14,6 +17,14 @@ describe('local Steam Deck bridge', () => {
     expect(isPrivateIpv4('127.0.0.1')).toBe(true);
     expect(isPrivateIpv4('8.8.8.8')).toBe(false);
     expect(isPrivateIpv4('steamdeck.local')).toBe(false);
+  });
+
+  it('only treats loopback clients as local', () => {
+    expect(isLoopbackAddress('127.0.0.1')).toBe(true);
+    expect(isLoopbackAddress('::1')).toBe(true);
+    expect(isLoopbackAddress('::ffff:127.0.0.1')).toBe(true);
+    expect(isLoopbackAddress('192.168.1.20')).toBe(false);
+    expect(isLoopbackAddress(undefined)).toBe(false);
   });
 
   it('validates credentials without normalizing the password', () => {
@@ -33,6 +44,26 @@ describe('local Steam Deck bridge', () => {
   it('recognizes SteamOS identity without accepting a generic Linux host', () => {
     expect(isSteamDeckOsRelease('NAME="SteamOS"\nID=steamos\nVARIANT_ID=steamdeck\n')).toBe(true);
     expect(isSteamDeckOsRelease('NAME=Arch Linux\nID=arch\n')).toBe(false);
+  });
+
+  it('matches plain and hashed OpenSSH host patterns', async () => {
+    expect(knownHostPatternMatches('10.32.192.31', '10.32.192.31')).toBe(true);
+    expect(knownHostPatternMatches('[10.32.192.31]:22', '10.32.192.31')).toBe(true);
+    expect(knownHostPatternMatches('10.32.192.32', '10.32.192.31')).toBe(false);
+
+    const { createHmac } = await import('node:crypto');
+    const salt = Buffer.from('fixed test salt');
+    const digest = createHmac('sha1', salt).update('10.32.192.31').digest('base64');
+    const pattern = `|1|${salt.toString('base64')}|${digest}`;
+    expect(knownHostPatternMatches(pattern, '10.32.192.31')).toBe(true);
+    expect(knownHostPatternMatches(pattern, '10.32.192.32')).toBe(false);
+  });
+
+  it('extracts only matching trusted public keys', () => {
+    const key = Buffer.from('synthetic public key blob').toString('base64');
+    const contents = `# comment\n10.32.192.31 ssh-ed25519 ${key}\n10.0.0.2 ssh-ed25519 ZGlmZmVyZW50\n`;
+    expect([...parseTrustedHostKeys(contents, '10.32.192.31')]).toEqual([key]);
+    expect(parseTrustedHostKeys(contents, '10.32.192.32').size).toBe(0);
   });
 
   it('chooses the newest save and prefers the native save on a timestamp tie', () => {

@@ -497,7 +497,7 @@ function UploadScreen({
           )}
         </p>
         <div className="landing__trust">
-          <span><ShieldCheck size={17} /> {l('The file never leaves your browser', 'El archivo no sale del navegador')}</span>
+          <span><ShieldCheck size={17} /> {l('The save is processed in this browser', 'La partida se procesa en este navegador')}</span>
           <span><HardDrive size={17} /> {l('It is never saved or rewritten', 'No se guarda ni se reescribe')}</span>
           <span><EyeOff size={17} /> {l('Spoiler-safe by default', 'Modo sin spoilers por defecto')}</span>
         </div>
@@ -574,15 +574,15 @@ function UploadScreen({
                 <span>{l('Linux user', 'Usuario Linux')}</span>
                 <input type="text" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} disabled={busy} required />
               </label>
-              <label>
-                <span>{l('Password', 'Contraseña')}</span>
+              <div className="deck-field">
+                <label htmlFor="steam-deck-password">{l('Password', 'Contraseña')}</label>
                 <span className="password-field">
-                  <input type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} required />
+                  <input id="steam-deck-password" type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} required />
                   <button type="button" onClick={() => setShowPassword((value) => !value)} disabled={busy} title={showPassword ? l('Hide password', 'Ocultar contraseña') : l('Show password', 'Mostrar contraseña')} aria-label={showPassword ? l('Hide password', 'Ocultar contraseña') : l('Show password', 'Mostrar contraseña')}>
                     {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
                   </button>
                 </span>
-              </label>
+              </div>
             </div>
             <button className="primary-button deck-form__submit" type="submit" disabled={busy}>
               {busy ? <RefreshCw className="spin" size={18} /> : <Download size={18} />}

@@ -64,7 +64,7 @@ npm run dev
 
 The application will be available at the URL reported by Vite, usually `http://localhost:5173`.
 
-The Steam Deck connection requires SSH to be enabled on the Deck and the analyzer to be opened through a loopback URL such as `http://localhost:5173`. Enter a private IPv4 address, the Deck's Linux username, and password in the Steam Deck tab. Manual file selection remains entirely browser-only.
+The Steam Deck connection requires SSH to be enabled on the Deck, its host key to be verified in the local user's `~/.ssh/known_hosts`, and the analyzer to be opened through a loopback URL such as `http://localhost:5173`. Enter a private IPv4 address, the Deck's Linux username, and password in the Steam Deck tab. For a new Deck, connect once with `ssh deck@PRIVATE_IP`, verify the displayed fingerprint, and disconnect before using the form. Manual file selection remains entirely browser-only.
 
 ### Validation
 
