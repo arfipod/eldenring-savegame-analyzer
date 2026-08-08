@@ -17,6 +17,7 @@ import {
   FileJson,
   FileSearch,
   FlaskConical,
+  Gamepad2,
   Gauge,
   HardDrive,
   HeartPulse,
@@ -40,7 +41,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChangeEvent, CSSProperties, Dispatch, DragEvent, ReactNode, SetStateAction } from 'react';
+import type { ChangeEvent, CSSProperties, Dispatch, DragEvent, FormEvent, ReactNode, SetStateAction } from 'react';
 import { getFallbackCatalog, loadSemanticCatalog } from './lib/catalog';
 import { runeCostForNextLevel, runesBetweenLevels } from './lib/build-advisor';
 import {
@@ -202,6 +203,12 @@ function useLanguage(): LanguageContextValue {
 interface ToastState {
   kind: 'success' | 'error';
   message: string;
+}
+
+interface SteamDeckConnection {
+  host: string;
+  username: string;
+  password: string;
 }
 
 function joinClass(...values: Array<string | false | null | undefined>): string {
@@ -442,6 +449,7 @@ function UploadScreen({
   dragging,
   error,
   onFile,
+  onSteamDeck,
   onDragState,
 }: {
   busy: boolean;
@@ -450,16 +458,31 @@ function UploadScreen({
   dragging: boolean;
   error: string | null;
   onFile: (file: File) => void;
+  onSteamDeck: (connection: SteamDeckConnection) => Promise<void>;
   onDragState: (value: boolean) => void;
 }) {
   const { l } = useLanguage();
   const inputRef = useRef<HTMLInputElement>(null);
+  const [source, setSource] = useState<'file' | 'steam-deck'>('file');
+  const [host, setHost] = useState('');
+  const [username, setUsername] = useState('deck');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const choose = () => inputRef.current?.click();
   const handleDrop = (event: DragEvent) => {
     event.preventDefault();
     onDragState(false);
     const file = event.dataTransfer.files[0];
     if (file) onFile(file);
+  };
+  const connectToSteamDeck = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    try {
+      await onSteamDeck({ host, username, password });
+    } finally {
+      setPassword('');
+      setShowPassword(false);
+    }
   };
 
   return (
@@ -492,29 +515,82 @@ function UploadScreen({
             event.currentTarget.value = '';
           }}
         />
-        <button
-          className={joinClass('drop-zone', dragging && 'drop-zone--dragging', busy && 'drop-zone--busy')}
-          type="button"
-          onClick={choose}
-          onDragEnter={(event: DragEvent<HTMLButtonElement>) => { event.preventDefault(); onDragState(true); }}
-          onDragOver={(event: DragEvent<HTMLButtonElement>) => event.preventDefault()}
-          onDragLeave={(event: DragEvent<HTMLButtonElement>) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onDragState(false);
-          }}
-          onDrop={handleDrop}
-          disabled={busy}
-        >
-          <span className="drop-zone__icon">
-            {busy ? <RefreshCw className="spin" size={34} /> : <UploadCloud size={38} />}
-          </span>
-          <strong>{busy ? stage : l('Drop ER0000.sl2 here', 'Arrastra ER0000.sl2 aquí')}</strong>
-          <span>{busy ? `${Math.round(progress * 100)} %` : l('or click to choose the file from your Steam Deck or PC', 'o pulsa para elegir el archivo de tu Steam Deck o PC')}</span>
-          {busy && (
-            <span className="progress-track" aria-label={l(`Progress ${Math.round(progress * 100)}%`, `Progreso ${Math.round(progress * 100)} %`)}>
-              <span style={{ width: `${Math.max(3, progress * 100)}%` }} />
+        <div className="source-tabs" role="tablist" aria-label={l('Save source', 'Origen de la partida')}>
+          <button type="button" role="tab" aria-selected={source === 'file'} className={source === 'file' ? 'source-tabs__active' : undefined} onClick={() => setSource('file')} disabled={busy}>
+            <HardDrive size={17} /> {l('This device', 'Este dispositivo')}
+          </button>
+          <button type="button" role="tab" aria-selected={source === 'steam-deck'} className={source === 'steam-deck' ? 'source-tabs__active' : undefined} onClick={() => setSource('steam-deck')} disabled={busy}>
+            <Gamepad2 size={17} /> Steam Deck
+          </button>
+        </div>
+
+        {source === 'file' ? (
+          <button
+            className={joinClass('drop-zone', dragging && 'drop-zone--dragging', busy && 'drop-zone--busy')}
+            type="button"
+            role="tabpanel"
+            onClick={choose}
+            onDragEnter={(event: DragEvent<HTMLButtonElement>) => { event.preventDefault(); onDragState(true); }}
+            onDragOver={(event: DragEvent<HTMLButtonElement>) => event.preventDefault()}
+            onDragLeave={(event: DragEvent<HTMLButtonElement>) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onDragState(false);
+            }}
+            onDrop={handleDrop}
+            disabled={busy}
+          >
+            <span className="drop-zone__icon">
+              {busy ? <RefreshCw className="spin" size={34} /> : <UploadCloud size={38} />}
             </span>
-          )}
-        </button>
+            <strong>{busy ? stage : l('Drop ER0000.sl2 here', 'Arrastra ER0000.sl2 aquí')}</strong>
+            <span>{busy ? `${Math.round(progress * 100)} %` : l('or click to choose the file from your Steam Deck or PC', 'o pulsa para elegir el archivo de tu Steam Deck o PC')}</span>
+            {busy && (
+              <span className="progress-track" aria-label={l(`Progress ${Math.round(progress * 100)}%`, `Progreso ${Math.round(progress * 100)} %`)}>
+                <span style={{ width: `${Math.max(3, progress * 100)}%` }} />
+              </span>
+            )}
+          </button>
+        ) : (
+          <form className="deck-form" role="tabpanel" onSubmit={connectToSteamDeck}>
+            <div className="deck-form__heading">
+              <span className="drop-zone__icon">
+                {busy ? <RefreshCw className="spin" size={34} /> : <Gamepad2 size={38} />}
+              </span>
+              <div>
+                <strong>{busy ? stage : l('Connect to your Steam Deck', 'Conecta con tu Steam Deck')}</strong>
+                <span>{busy ? `${Math.round(progress * 100)} %` : l('SSH must be enabled on the console.', 'SSH debe estar activado en la consola.')}</span>
+              </div>
+            </div>
+            {busy && (
+              <span className="progress-track" aria-label={l(`Progress ${Math.round(progress * 100)}%`, `Progreso ${Math.round(progress * 100)} %`)}>
+                <span style={{ width: `${Math.max(3, progress * 100)}%` }} />
+              </span>
+            )}
+            <div className="deck-form__fields">
+              <label>
+                <span>{l('Private IP address', 'Dirección IP privada')}</span>
+                <input type="text" inputMode="decimal" autoComplete="off" placeholder="192.168.1.50" value={host} onChange={(event) => setHost(event.target.value)} disabled={busy} required />
+              </label>
+              <label>
+                <span>{l('Linux user', 'Usuario Linux')}</span>
+                <input type="text" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} disabled={busy} required />
+              </label>
+              <label>
+                <span>{l('Password', 'Contraseña')}</span>
+                <span className="password-field">
+                  <input type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} required />
+                  <button type="button" onClick={() => setShowPassword((value) => !value)} disabled={busy} title={showPassword ? l('Hide password', 'Ocultar contraseña') : l('Show password', 'Mostrar contraseña')} aria-label={showPassword ? l('Hide password', 'Ocultar contraseña') : l('Show password', 'Mostrar contraseña')}>
+                    {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </span>
+              </label>
+            </div>
+            <button className="primary-button deck-form__submit" type="submit" disabled={busy}>
+              {busy ? <RefreshCw className="spin" size={18} /> : <Download size={18} />}
+              {l('Find and analyze save', 'Buscar y analizar partida')}
+            </button>
+            <p className="deck-form__privacy"><LockKeyhole size={15} /> {l('Available only in the locally run app. Credentials stay in memory and are discarded after the attempt.', 'Disponible solo al ejecutar la app localmente. Las credenciales permanecen en memoria y se descartan tras el intento.')}</p>
+          </form>
+        )}
         {error && (
           <div className="inline-alert inline-alert--danger" role="alert">
             <AlertTriangle aria-hidden="true" size={19} />
@@ -1183,6 +1259,7 @@ export default function App() {
   const [save, setSave] = useState<ParsedSave | null>(null);
   const [selectedSlotId, setSelectedSlotId] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [deckBusy, setDeckBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [stage, setStage] = useState(localize(language, 'Preparing…', 'Preparando…'));
   const [error, setError] = useState<string | null>(null);
@@ -1311,9 +1388,84 @@ export default function App() {
     }
   }, [language, l]);
 
+  const fetchSteamDeckSave = useCallback(async (connection: SteamDeckConnection) => {
+    setError(null);
+    const isLoopback = window.location.hostname === 'localhost'
+      || window.location.hostname === '127.0.0.1'
+      || window.location.hostname === '::1';
+    if (!isLoopback) {
+      setError(l(
+        'Steam Deck access is only available from the local app opened on localhost.',
+        'El acceso a Steam Deck solo está disponible desde la app local abierta en localhost.',
+      ));
+      return;
+    }
+
+    setDeckBusy(true);
+    setProgress(0.03);
+    setStage(l('Connecting securely to SteamOS…', 'Conectando de forma segura con SteamOS…'));
+    try {
+      const response = await fetch('/api/local/steam-deck-save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(connection),
+        cache: 'no-store',
+        credentials: 'same-origin',
+      });
+      const fileName = response.headers.get('X-Save-File-Name');
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error ?? l('The Steam Deck connection failed.', 'La conexión con Steam Deck ha fallado.'));
+      }
+      if (fileName !== 'ER0000.sl2' && fileName !== 'ER0000.co2') {
+        throw new Error(l(
+          'The local SSH bridge is not available. Start the app with npm run dev.',
+          'El puente SSH local no está disponible. Inicia la app con npm run dev.',
+        ));
+      }
+
+      const expectedSize = Number(response.headers.get('Content-Length'));
+      if (!Number.isSafeInteger(expectedSize) || expectedSize < 1 || expectedSize > 64 * 1024 * 1024) {
+        throw new Error(l('The remote save size is not valid.', 'El tamaño de la partida remota no es válido.'));
+      }
+      if (!response.body) throw new Error(l('The remote save response is empty.', 'La respuesta de la partida remota está vacía.'));
+
+      setStage(l('Downloading the read-only copy…', 'Descargando la copia de solo lectura…'));
+      const reader = response.body.getReader();
+      const chunks: ArrayBuffer[] = [];
+      let received = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        received += value.byteLength;
+        if (received > expectedSize || received > 64 * 1024 * 1024) {
+          await reader.cancel();
+          throw new Error(l('The remote save exceeded its declared size.', 'La partida remota superó el tamaño declarado.'));
+        }
+        const chunk = new ArrayBuffer(value.byteLength);
+        new Uint8Array(chunk).set(value);
+        chunks.push(chunk);
+        setProgress(0.05 + (received / expectedSize) * 0.28);
+      }
+      if (received !== expectedSize) {
+        throw new Error(l('The remote save download was incomplete.', 'La descarga de la partida remota quedó incompleta.'));
+      }
+
+      const lastModifiedHeader = Number(response.headers.get('X-Save-Last-Modified'));
+      const lastModified = Number.isFinite(lastModifiedHeader) && lastModifiedHeader > 0 ? lastModifiedHeader : Date.now();
+      const file = new File(chunks, fileName, { type: 'application/octet-stream', lastModified });
+      setDeckBusy(false);
+      await parseFile(file);
+    } catch (caught) {
+      setDeckBusy(false);
+      setProgress(0);
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }, [l, parseFile]);
+
   const reset = () => {
     workerRef.current?.terminate(); workerRef.current = null;
-    setSave(null); setError(null); setBusy(false); setProgress(0); setStage(l('Preparing…', 'Preparando…')); setToast(null);
+    setSave(null); setError(null); setBusy(false); setDeckBusy(false); setProgress(0); setStage(l('Preparing…', 'Preparando…')); setToast(null);
   };
 
   return (
@@ -1321,7 +1473,7 @@ export default function App() {
     <div className="app-shell">
       <AppHeader catalog={catalog} catalogStatus={catalogStatus} language={language} onLanguage={setLanguage} />
       {!save ? (
-        <UploadScreen busy={busy} progress={progress} stage={stage} dragging={dragging} error={error} onFile={parseFile} onDragState={setDragging} />
+        <UploadScreen busy={busy || deckBusy} progress={progress} stage={stage} dragging={dragging} error={error} onFile={parseFile} onSteamDeck={fetchSteamDeckSave} onDragState={setDragging} />
       ) : (
         <Dashboard
           save={save}

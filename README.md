@@ -19,12 +19,15 @@ A read-only React application for analyzing **Elden Ring PC save files** (`ER000
 - Semantic JSON, forensic JSON, and AI-ready Markdown exports.
 - Configurable privacy; Steam IDs, coordinates, internal IDs, and the event bitfield are excluded by default.
 - Heavy processing runs in a Web Worker to keep the interface responsive.
+- Optional read-only Steam Deck retrieval over SSH/SFTP when the app is run locally.
 - Responsive design suitable for Steam Deck and touchscreens.
 - Complete English and Spanish localization with a persistent in-app language switch.
 
 ## Privacy and security
 
-The selected file is read with `File.arrayBuffer()` in the browser and transferred to a Web Worker. There is no API, database, telemetry, or save-file upload. The application never writes to the original file and contains no editing features.
+The selected file is read with `File.arrayBuffer()` in the browser and transferred to a Web Worker. There is no remote API, database, telemetry, or save-file upload. The application never writes to the original file and contains no editing features.
+
+When the optional Steam Deck form is used from `localhost`, the browser sends the IP, username, and password only to the local Vite process. That process accepts private IPv4 targets only, verifies that the remote device identifies itself as SteamOS, and reads the newest standard Elden Ring save over SFTP. Credentials remain in memory for the attempt, are not logged or persisted, and the save is streamed directly back to the browser under the same 64 MiB limit. This bridge is unavailable in static deployments such as Vercel.
 
 To give names and context to internal IDs, the application downloads static JSON catalogs from pinned revisions of community projects. Progress lists are combined with enriched records for tools, consumables, and materials. These requests **contain no save data**. If they fail, the application uses a minimal built-in catalog and the binary parser continues to work.
 
@@ -61,6 +64,8 @@ npm run dev
 
 The application will be available at the URL reported by Vite, usually `http://localhost:5173`.
 
+The Steam Deck connection requires SSH to be enabled on the Deck and the analyzer to be opened through a loopback URL such as `http://localhost:5173`. Enter a private IPv4 address, the Deck's Linux username, and password in the Steam Deck tab. Manual file selection remains entirely browser-only.
+
 ### Validation
 
 ```bash
@@ -76,6 +81,8 @@ npm run check
 ```
 
 ## Deploying to Vercel
+
+Static deployments support local file selection and analysis. Direct Steam Deck retrieval is deliberately disabled because a hosted server must never receive console credentials or private save data.
 
 1. Push this directory to a Git repository.
 2. Import the repository into Vercel.
