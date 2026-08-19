@@ -1,0 +1,22 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.arfipod.decksave'
+    compileSdk 35
+
+    defaultConfig {
+        // New package id so this improved build can be installed beside the
+        // first debug APK, whose ephemeral CI signing key cannot be reused.
+        applicationId 'com.arfipod.decksave2'
+        minSdk 29
+        targetSdk 35
+        versionCode 2
+        versionName '1.1.0'
+    }
+}
+
+dependencies {
+    implementation 'com.github.mwiede:jsch:0.2.26'
+}

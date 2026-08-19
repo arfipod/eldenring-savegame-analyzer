@@ -5,6 +5,11 @@ dist
 .DS_Store
 coverage
 
+# Android local/build outputs.
+**/.gradle/
+**/build/
+**/local.properties
+
 # Never commit user saves or generated personal exports.
 *.sl2
 *.co2
